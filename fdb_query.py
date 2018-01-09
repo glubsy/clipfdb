@@ -5,6 +5,8 @@ import re
 import subprocess
 import json
 from operator import itemgetter
+from locale import setlocale, strxfrm, LC_ALL
+import operator
 # from ast import literal_eval
 
 from constants import BColors
@@ -33,27 +35,27 @@ class FDBEmbedded():
             return
 
         self.fdb_avail = True
-        self.db_filepath = ""
-        self.setup_environmentvars("~/test", "~/test/CGI.vvv")
+        self.db_filepaths = ('~/test/CGI.vvv', '~/test/test.vvv') #TODO: get values from config file
+        self.setup_environmentvars("~/test") #TODO: get value from config file
         # self.repattern_tumblr_full = re.compile(r'(tumblr_.*_).*\..*') #eg (tumblr_abcdeo1_)raw.jpg
         self.repattern_tumblr = re.compile(r'(tumblr_.*o)[1-10]+_.*\..*', re.I) #eg (tumblr_abcdeo)10_raw.jpg
         self.repattern_tumblr_inline = re.compile(r'(tumblr_inline_.*)_.{3,4}.*', re.I) #eg (tumblr_inline_abcdeo)_540.jpg
 
         self.notifyinstance = Notifier2()
-        self.queryobj = FDBQuery()
+        self.query_ojects = list()
+
+        for item in self.db_filepaths: #generate as many objects as there are databases to query
+            self.query_ojects.append(FDBQuery(item))
 
 
 
-    def setup_environmentvars(self, path, mydbfilepath):
+    def setup_environmentvars(self, path):
         """Sets up the FIREBIRD env var for securty2.fdb lookup"""
         # Point to our current VVV firebird database (for security2.fdb)
         # os.environ['FIREBIRD'] = '~/INSTALLED/VVV-1.3.0-x86_64/firebird'
-        # Alternatively, use a copy of the security2.fdb:
-
+        # Alternatively, use a copy of the security2.fdb in that path:
         os.environ['FIREBIRD'] = path
-        self.db_filepath = mydbfilepath
-        print(BColors.WARNING + 'setup_environmentvars():\nFIREBIRD set:' + \
-        os.environ['FIREBIRD'] + "\nmydbfilepath:" + self.db_filepath + BColors.ENDC)
+        setlocale(LC_ALL, "")
         return True
 
 
@@ -63,13 +65,19 @@ class FDBEmbedded():
         if not self.fdb_avail:
             return
 
-        self.queryobj.activate()
+        for queryobj in self.query_ojects:
+            queryobj.activate()
 
-        self.queryobj.originaltext = board_content
-        self.parse_clipboard_content(self.queryobj.originaltext)
+        parsed_content = self.parse_clipboard_content(board_content)
 
-        if self.queryobj.is_active:
-            self.notifyinstance.init_send_notification(self.queryobj.validated_dict)
+        for queryobj in self.query_ojects:
+            queryobj.response_dict['original_query'] = parsed_content
+
+            if not queryobj.is_disabled:
+                self.get_set_from_result(queryobj)
+
+            if queryobj.is_active and not queryobj.is_disabled:
+                self.notifyinstance.init_send_notification(queryobj)
 
 
 
@@ -80,7 +88,8 @@ class FDBEmbedded():
         board_content = board_content.split("\n")[0] # we stop at the first newline found
         length = len(board_content)
         if length < 4 or length > 180: #arbitrary 3 character long?
-            self.queryobj.is_active = False
+            for queryobj in self.query_ojects:
+                queryobj.is_disabled = True #query is too short
             return
         else:
             result = board_content
@@ -97,23 +106,21 @@ class FDBEmbedded():
                 #select only last item with extension
                 result = result.split("/")[-1].split(".")[0]
 
-            self.queryobj.validated_dict['original_query'] = result
-
-            self.get_set_from_result(result)
-            return
+            return result
 
 
-    def get_set_from_result(self, word):
+
+    def get_set_from_result(self, queryobj):
         """Search our FDB for word
         returns set(found_list), int(found_count)"""
-        print("\nget_set_from_result(): looking for: |" + word + "|\n")
+        print("\nget_set_from_result(): looking for: |" + queryobj.response_dict['original_query'] + "|\n")
         found_list = list()
         found_count = 0
         # con1 = services.connect(user='sysdba', password='masterkey')
         # print("Security file for database is: ", con1.get_security_database_path() + "\n")
 
         con = fdb.connect(
-            database=self.db_filepath,
+            database=queryobj.db_filepath,
             # dsn='localhost:~/test/CGI.vvv', #localhost:3050
             user='sysdba', password='masterkey'
             #charset='UTF8' # specify a character set for the connection
@@ -122,33 +129,46 @@ class FDBEmbedded():
         # Create a Cursor object that operates in the context of Connection con:
         cur = con.cursor()
 
-        if "'" in word: # we need to add an extra for SQL statements
-            word = word.replace("'", "''")
+        # we need to add an extra for SQL statements
+        if "'" in queryobj.response_dict['original_query']:
+            querystring = queryobj.response_dict['original_query'].replace("'", "''")
 
-        word = word.upper() # for case insensitive search
+        querystring = queryobj.response_dict['original_query'].upper() # for case insensitive search
 
-        # SELECT = "select * from FILES WHERE FILE_NAME LIKE '%" + word + ".%'" # adding period to include start of extension
         # adding UPPER for case insensitive
-        SELECT = "select FILE_NAME, FILE_SIZE from FILES WHERE UPPER (FILE_NAME) LIKE '%" + word + "%'"
+        select_stmt = "select FILE_NAME, FILE_SIZE from FILES WHERE UPPER (FILE_NAME) LIKE '%" \
+        + querystring + "%'"
 
         try:
-            cur.execute(SELECT)
+            cur.execute(select_stmt)
 
             for row in cur:
                 print(BColors.OKGREEN + "FDB found: " + row[0] + " " + str(row[1]) + BColors.ENDC)
                 found_list.append((row[0], row[1]))
                 found_count += 1
+                if found_count > 20: #maximum results returned
+                    break
 
-            found_list.sort(key=itemgetter(0, 1))
-            print(BColors.OKGREEN + "found_count: " + str(found_count) + BColors.ENDC)
-            print(BColors.OKGREEN + "found_list: " + str(found_list) + BColors.ENDC)
+            # found_list.sort(key=itemgetter(0, 1)) #sort alphabetically, then by size, but ignore case
+            found_list.sort(key=self.locale_keyfunc(operator.itemgetter(0))) #sort alphabetically, CI
+            # print(BColors.OKGREEN + "DEBUG found_count: " + str(found_count) + BColors.ENDC)
+            # print(BColors.OKGREEN + "DEBUG found_list: " + str(found_list) + BColors.ENDC)
             con.close()
-            self.queryobj.validated_dict['found_words'], self.queryobj.validated_dict['count'] = found_list, found_count
+            queryobj.response_dict['found_words'], queryobj.response_dict['count'] \
+            = found_list, found_count
 
         except Exception as identifier:
-            errormesg = "Error while looking up: " + word + "\n" + str(identifier)
+            errormesg = "Error while looking up: " + queryobj.response_dict['original_query'] \
+            + "\n" + str(identifier)
             print(BColors.FAIL + errormesg + BColors.ENDC)
-            self.queryobj.is_active = False
+            queryobj.is_disabled = True
+
+
+    def locale_keyfunc(self, keyfunc):
+        """use Locale for sorting"""
+        def locale_wrapper(obj):
+            return strxfrm(keyfunc(obj))
+        return locale_wrapper
 
 # if __name__ == "__main__":
 #     OBJ = FDBquery()
@@ -183,14 +203,17 @@ class FDBEmbedded():
 class FDBQuery():
     """a query object"""
 
-    def __init__(self):
+    def __init__(self, databasepath):
         self.is_active = False
-        self.originaltext = ""
-        self.validated_dict = {'found_words': '', 'count': '', 'original_query': ''}
+        self.is_disabled = True
+        self.db_filepath = databasepath
+        self.db_filename = databasepath.split("/")[-1]
+        self.response_dict = {'found_words': '', 'count': '', 'original_query': ''}
 
     def activate(self):
+        self.response_dict = {'found_words': '', 'count': '', 'original_query': ''}
         self.is_active = True
-
+        self.is_disabled = False
 
 
 class Notifier2():
@@ -206,28 +229,29 @@ class Notifier2():
         # print("caps:\n" + json.dumps(caps))
         # self.sendnotification("FDB_QUERY")
 
-    def init_send_notification(self, dictionary):
+    def init_send_notification(self, obj):
         """choose between libnotify2 or notify-send depending on import resulsts"""
         if NOTIFY2_AVAIL:
-            self.notify2_notify(dictionary)
+            self.notify2_notify(obj)
         else:
-            self.notify_send_wrapper(dictionary)
+            self.notify_send_wrapper(obj)
 
 
-    def notify2_notify(self, dictionary):
+    def notify2_notify(self, obj):
         """sends dictionary['found_words'] to notification server"""
         if not NOTIFY2_AVAIL:
             return
 
         found_words = ""
-        for item, size in dictionary['found_words']:
+        for item, size in obj.response_dict['found_words']:
             found_words += item + " " + self.bytes_2_human_readable(size) + "\n"
-        count = dictionary['count']
-        summary = "Found: " + str(count) + " for " + dictionary['original_query']
+        count = obj.response_dict['count']
+        summary = "Found: " + str(count) + " for " + \
+        obj.response_dict['original_query'] + " in " + obj.db_filename
         formatted_msg = found_words
         notif = notify2.Notification(summary,
-                                        formatted_msg,
-                                        "dialog-information" # Icon name in /usr/share/icons/
+                                     formatted_msg,
+                                     "dialog-information" # Icon name in /usr/share/icons/
                                     )
         notif.timeout = 30000 #show for 30 seconds
         # Set categories for notif server to display special colours and stuffs
@@ -274,12 +298,12 @@ class Notifier2():
         return str(number_of_bytes) + ' ' + unit
 
 
-    def notify_send_wrapper(self, dictionary):
+    def notify_send_wrapper(self, obj):
         """Fallback method in case notify2 couldn't be imported
         sends dictionary['valid_words', 'count', 'original_word'] to notify-send"""
 
         #FIXME: add summary and formatting like notify2
-        strings = ', '.join(str(e) for e in dictionary['found_words'])
+        strings = ', '.join(str(e) for e in obj.response_dict['found_words'])
 
         print("STRINGS: ", strings)
         try:
