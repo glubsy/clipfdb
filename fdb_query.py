@@ -4,6 +4,7 @@ import re
 # from fdb import services
 import subprocess
 import json
+from operator import itemgetter
 # from ast import literal_eval
 
 from constants import BColors
@@ -13,7 +14,7 @@ try:
     FDB_AVAILABLE = True
     try:
         import notify2
-        NOTIFY2_AVAIL = False
+        NOTIFY2_AVAIL = True
     except ImportError:
         NOTIFY2_AVAIL = False
 except ImportError:
@@ -35,7 +36,8 @@ class FDBEmbedded():
         self.db_filepath = ""
         self.setup_environmentvars("~/test", "~/test/CGI.vvv")
         # self.repattern_tumblr_full = re.compile(r'(tumblr_.*_).*\..*') #eg (tumblr_abcdeo1_)raw.jpg
-        self.repattern_tumblr = re.compile(r'(tumblr_.*o)[1-10]+_.*\..*') #eg (tumblr_abcdeo)1
+        self.repattern_tumblr = re.compile(r'(tumblr_.*o)[1-10]+_.*\..*', re.I) #eg (tumblr_abcdeo)10_raw.jpg
+        self.repattern_tumblr_inline = re.compile(r'(tumblr_inline_.*)_.{3,4}.*', re.I) #eg (tumblr_inline_abcdeo)_540.jpg
 
         self.notifyinstance = Notifier2()
         self.queryobj = FDBQuery()
@@ -75,31 +77,37 @@ class FDBEmbedded():
         """isolate filename from URIs, extensions and whatnot,
         returns dic{'validwords', 'count', 'original_string'} """
 
-        board_content = board_content.split("\n")[0] #we stop at the first newline found
+        board_content = board_content.split("\n")[0] # we stop at the first newline found
         length = len(board_content)
-        if length <= 5 or length > 180: #arbitrary 4 character long?
+        if length < 4 or length > 180: #arbitrary 3 character long?
             self.queryobj.is_active = False
             return
         else:
-            #TODO: figure out a better optimized way of parsing these
-            if "https://" in board_content or "http://" in board_content:
-                #select only last item, minus extension
-                print("last item in url: " + board_content.split("/")[-1])
+            result = board_content
             if "tumblr" in board_content:
-                result = self.repattern_tumblr(board_content)
-                print("tumblr filename: " + board_content + result)
+                reresult = self.repattern_tumblr.search(board_content)
+                if reresult: #matches
+                    result = reresult.group(1)
+                else:
+                    reresult = self.repattern_tumblr_inline.search(board_content)
+                    if reresult:
+                        result = reresult.group(1)
+            # if "https://" in board_content or "http://" in board_content:
+            elif result.find("http") or result.find("https"):
+                #select only last item with extension
+                result = result.split("/")[-1].split(".")[0]
 
-            self.queryobj.validated_dict['original_query'] = board_content
+            self.queryobj.validated_dict['original_query'] = result
 
-            self.queryobj.validated_dict['found_words'], self.queryobj.validated_dict['count'] = self.get_set_from_result(board_content)
+            self.get_set_from_result(result)
             return
 
 
     def get_set_from_result(self, word):
         """Search our FDB for word
-        returns set(found_set), int(found_count)"""
+        returns set(found_list), int(found_count)"""
         print("\nget_set_from_result(): looking for: |" + word + "|\n")
-        found_set = set()
+        found_list = list()
         found_count = 0
         # con1 = services.connect(user='sysdba', password='masterkey')
         # print("Security file for database is: ", con1.get_security_database_path() + "\n")
@@ -121,24 +129,26 @@ class FDBEmbedded():
 
         # SELECT = "select * from FILES WHERE FILE_NAME LIKE '%" + word + ".%'" # adding period to include start of extension
         # adding UPPER for case insensitive
-        SELECT = "select * from FILES WHERE UPPER (FILE_NAME) LIKE '%" + word + "%'"
+        SELECT = "select FILE_NAME, FILE_SIZE from FILES WHERE UPPER (FILE_NAME) LIKE '%" + word + "%'"
 
         try:
             cur.execute(SELECT)
 
             for row in cur:
-                print(BColors.OKGREEN + "FDB found: " + row[1] + BColors.ENDC)
-                found_set.add(row[1])
+                print(BColors.OKGREEN + "FDB found: " + row[0] + " " + str(row[1]) + BColors.ENDC)
+                found_list.append((row[0], row[1]))
                 found_count += 1
 
+            found_list.sort(key=itemgetter(0, 1))
             print(BColors.OKGREEN + "found_count: " + str(found_count) + BColors.ENDC)
+            print(BColors.OKGREEN + "found_list: " + str(found_list) + BColors.ENDC)
             con.close()
-            return found_set, found_count
+            self.queryobj.validated_dict['found_words'], self.queryobj.validated_dict['count'] = found_list, found_count
 
         except Exception as identifier:
             errormesg = "Error while looking up: " + word + "\n" + str(identifier)
             print(BColors.FAIL + errormesg + BColors.ENDC)
-            return found_set, found_count
+            self.queryobj.is_active = False
 
 # if __name__ == "__main__":
 #     OBJ = FDBquery()
@@ -208,20 +218,60 @@ class Notifier2():
         """sends dictionary['found_words'] to notification server"""
         if not NOTIFY2_AVAIL:
             return
-        if dictionary is not None:
-            found_words = ""
-            for item in dictionary['found_words']:
-                found_words += item + "\n"
-            count = dictionary['count']
-            summary = "Found: " + str(count) + " for " + dictionary['original_query']
-            formatted_msg = found_words
-            notif = notify2.Notification(summary,
-                                         formatted_msg,
-                                         "dialog-information" # Icon name in /usr/share/icons/
-                                        )
-            notif.timeout = 30000 #show for 30 seconds
-            #notif.set_location(800, 600) #not supported by dunst
+
+        found_words = ""
+        for item, size in dictionary['found_words']:
+            found_words += item + " " + self.bytes_2_human_readable(size) + "\n"
+        count = dictionary['count']
+        summary = "Found: " + str(count) + " for " + dictionary['original_query']
+        formatted_msg = found_words
+        notif = notify2.Notification(summary,
+                                        formatted_msg,
+                                        "dialog-information" # Icon name in /usr/share/icons/
+                                    )
+        notif.timeout = 30000 #show for 30 seconds
+        # Set categories for notif server to display special colours and stuffs
+        if count > 0:
+            notif.set_category('fdb_query_found')
+        else:
+            notif.set_category('fdb_query_notfound')
+        #notif.set_location(800, 600) #not supported by dunst
+        try:
             notif.show()
+        except Exception as e:
+            print("Exception while notif.show():" + str(e))
+
+
+
+    def bytes_2_human_readable(self, number_of_bytes):
+        if number_of_bytes < 0:
+            raise ValueError("!!! number_of_bytes can't be smaller than 0 !!!")
+
+        step_to_greater_unit = 1024.
+
+        number_of_bytes = float(number_of_bytes)
+        unit = 'bytes'
+
+        if (number_of_bytes / step_to_greater_unit) >= 1:
+            number_of_bytes /= step_to_greater_unit
+            unit = 'KB'
+
+        if (number_of_bytes / step_to_greater_unit) >= 1:
+            number_of_bytes /= step_to_greater_unit
+            unit = 'MB'
+
+        if (number_of_bytes / step_to_greater_unit) >= 1:
+            number_of_bytes /= step_to_greater_unit
+            unit = 'GB'
+
+        if (number_of_bytes / step_to_greater_unit) >= 1:
+            number_of_bytes /= step_to_greater_unit
+            unit = 'TB'
+
+        precision = 1
+        number_of_bytes = round(number_of_bytes, precision)
+
+        return str(number_of_bytes) + ' ' + unit
 
 
     def notify_send_wrapper(self, dictionary):
