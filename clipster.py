@@ -19,7 +19,6 @@ import stat
 from contextlib import closing
 from gi import require_version
 import fdb_query
-import notifications
 require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GLib, GObject  # pylint:disable=wrong-import-position
 try:
@@ -207,9 +206,7 @@ class Daemon(object):
         # Flag whether next clipboard change should be ignored
         self.ignore_next = {'PRIMARY': False, 'CLIPBOARD': False}
         # fdb_query.py's class instantiated here
-        self.fdbquery = fdb_query.FDBquery()
-        self.notifier = notifications.Notifier()
-        self.notifier2 = notifications.Notifier2()
+        self.fdbquery = fdb_query.FDBEmbedded()
 
     def keypress_handler(self, widget, event, board, tree_select):
         """Handle selection_widget keypress events."""
@@ -497,12 +494,7 @@ class Daemon(object):
         if text:
             logging.debug("Selection is text.")
             if selection == "CLIPBOARD":
-                validated_dict = self.fdbquery.parse_clipboard_content(text)
-                #TODO: move the notifier call into fdb_query?
-                if validated_dict['count'] is not 0: 
-                    self.notifier2.sendnotification(validated_dict)
-                # if validated_dict['count'] is not 0: #TODO: play a sound when no result!
-                #     self.notifier.notify_send_wrapper(validated_dict)
+                self.fdbquery.query_databases(text)
 
             self.update_history(selection, text)
             # If no text received, either the selection was an empty string,
