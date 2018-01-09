@@ -21,8 +21,8 @@ class FDBquery():
             + "Make sure you've installed the fdb_embedded package correctly." + BColors.ENDC)
             return
 
-        self.setup_environmentvars("~/test", "~/test/CGI.vvv")
         self.db_filepath = ""
+        self.setup_environmentvars("~/test", "~/test/CGI.vvv")
         # self.repattern_tumblr_full = re.compile(r'(tumblr_.*_).*\..*') #eg (tumblr_abcdeo1_)raw.jpg
         self.repattern_tumblr = re.compile(r'(tumblr_.*o)[1-10]+_.*\..*') #eg (tumblr_abcdeo)1
 
@@ -63,7 +63,7 @@ class FDBquery():
                 result = self.repattern_tumblr(board_content)
                 print("tumblr filename: " + board_content + result)
 
-            valid_dict = {'found_words': '', 'count': '', 'original_text': board_content}
+            valid_dict = {'found_words': '', 'count': '', 'original_query': board_content}
 
             valid_dict['found_words'], valid_dict['count'] = self.get_set_from_result(board_content)
             return valid_dict
@@ -91,7 +91,11 @@ class FDBquery():
         if "'" in word: # we need to add an extra for SQL statements
             word = word.replace("'", "''")
 
-        SELECT = "select * from FILES WHERE FILE_NAME LIKE '%" + word + "%'" # adding period to include start of extension
+        word = word.upper() # for case insensitive search
+
+        # SELECT = "select * from FILES WHERE FILE_NAME LIKE '%" + word + ".%'" # adding period to include start of extension
+        # adding UPPER for case insensitive
+        SELECT = "select * from FILES WHERE UPPER (FILE_NAME) LIKE '%" + word + "%'"
 
         try:
             cur.execute(SELECT)

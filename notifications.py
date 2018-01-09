@@ -1,10 +1,44 @@
 #!/usr/bin/python3
 """Notification subsystem"""
 import subprocess
+import json
 # from ast import literal_eval
+try:
+    import notify2
+    NOTIFY2 = True
+except ImportError:
+    NOTIFY2 = False
+
+
+class Notifier2():
+    """notification object"""
+
+    def __init__(self):
+        notify2.init("clipboard")
+        # DEBUG
+        # info = notify2.get_server_info()
+        # caps = notify2.get_server_caps()
+        # print("info:\n" + json.dumps(info))
+        # print("caps:\n" + json.dumps(caps))
+        # self.sendnotification("FDB_QUERY")
+
+    def sendnotification(self, dictionary):
+        if dictionary is not None:
+            found_words = ""
+            for item in dictionary['found_words']:
+                found_words += item + "\n"
+            count = dictionary['count']
+            summary = "Found: " + count + " for " + dictionary['original_query']
+            formatted_msg = found_words
+            notif = notify2.Notification(summary,
+                                         formatted_msg,
+                                         "dialog-information" # Icon name in /usr/share/icons/
+                                        )
+            notif.show()
+
 
 class Notifier():
-    """handles communications with notifications daemon"""
+    """Use notify-send to pass notifications to notification server (ie. dunst)"""
     def __init__(self):
         pass
 

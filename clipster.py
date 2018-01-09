@@ -209,6 +209,7 @@ class Daemon(object):
         # fdb_query.py's class instantiated here
         self.fdbquery = fdb_query.FDBquery()
         self.notifier = notifications.Notifier()
+        self.notifier2 = notifications.Notifier2()
 
     def keypress_handler(self, widget, event, board, tree_select):
         """Handle selection_widget keypress events."""
@@ -498,8 +499,10 @@ class Daemon(object):
             if selection == "CLIPBOARD":
                 validated_dict = self.fdbquery.parse_clipboard_content(text)
                 #TODO: move the notifier call into fdb_query?
-                if validated_dict['count'] is not 0: #TODO: play a sound when no result!
-                    self.notifier.notify_send_wrapper(validated_dict)
+                if validated_dict['count'] is not 0: 
+                    self.notifier2.sendnotification(validated_dict)
+                # if validated_dict['count'] is not 0: #TODO: play a sound when no result!
+                #     self.notifier.notify_send_wrapper(validated_dict)
 
             self.update_history(selection, text)
             # If no text received, either the selection was an empty string,
