@@ -80,8 +80,9 @@ class FDBEmbedded():
 
     def init_config(self):
         conf_dir = os.path.dirname(os.path.realpath(__file__))
-        conf_file = conf_dir + "/clipfdb.conf" #TODO: make config path configurable (need argv?)
-
+        conf_file = conf_dir + os.sep + "clipfdb.conf" #TODO: make config path configurable (need argv?)
+	successsound = conf_dir + os.sep + sounds + os.sep + "340259__kaboose102__blippy-02_short.wav"
+	failuresound = conf_dir + os.sep + sounds + os.sep + "340259__kaboose102__blippy-01_short.wav"
         config_defaults = {"db_filepaths": "", # list of paths to databses files
                            "security2_path": "", # absolute path to security2.fdb
                            "notifications": "yes",
@@ -89,8 +90,8 @@ class FDBEmbedded():
                            "sound_notifications": "yes",
                            "use_paplay": "no", # prefer using paplay instead of simpleaudio
                            "terminal_output": "no", # output query results to stdout
-                           "success_sound": "", # absolute path to success sound file
-                           "failure_sound": "" # absolute path to failure sound file
+                           "success_sound": successsound, # absolute path to success sound file
+                           "failure_sound": failuresound # absolute path to failure sound file
                           }
 
         config = configparser.SafeConfigParser(config_defaults)
