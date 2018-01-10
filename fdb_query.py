@@ -3,10 +3,11 @@ import os
 import re
 # from fdb import services
 import subprocess
-import json
+# import json
+# import operator
 from operator import itemgetter
 from locale import setlocale, strxfrm, LC_ALL
-import operator
+import configparser
 # from ast import literal_eval
 
 from constants import BColors
@@ -28,6 +29,7 @@ try:
 except ImportError:
     FDB_AVAILABLE = False
 
+
 class FDBEmbedded():
     """Handles querying VVV firebird databases locally"""
 
@@ -40,19 +42,63 @@ class FDBEmbedded():
             return
 
         self.fdb_avail = True
-        self.db_filepaths = ('~/test/CGI.vvv', '~/test/test.vvv') #TODO: get values from config file
-        self.setup_environmentvars("~/test") #TODO: get value from config file
+        self.config = self.init_config()
+        self.db_filepaths = self.config.get('clipfdb', 'db_filepaths').split(",")
+        self.setup_environmentvars(self.config.get('clipfdb', 'security2_path'))
+        self.wants_notifications = self.config.getboolean('clipfdb', 'notifications')
+        self.wants_sound_notifications = self.config.getboolean('clipfdb', 'sound_notifications')
+        self.wants_terminal_output = self.config.getboolean('clipfdb', "terminal_output")
+
+        if not self.wants_terminal_output and not self.wants_sound_notifications and not self.wants_notifications:
+            self.fdb_avail = False
+            return # no use using us!
+
         # self.repattern_tumblr_full = re.compile(r'(tumblr_.*_).*\..*') #eg (tumblr_abcdeo1_)raw.jpg
         self.repattern_tumblr = re.compile(r'(tumblr_.*o)[1-10]+_.*\..*', re.I) #eg (tumblr_abcdeo)10_raw.jpg
         self.repattern_tumblr_inline = re.compile(r'(tumblr_inline_.*)_.{3,4}.*', re.I) #eg (tumblr_inline_abcdeo)_540.jpg
 
-        self.notifyinstance = Notifier2()
+        # initialize objects instances
+        if self.wants_notifications:
+            self.notifyinstance = Notifier2()
+            if self.config.getboolean('clipfdb', 'use_notify_send'):
+                self.notifyinstance.prefer_notify_send = True
+
         self.query_ojects = list()
 
         for item in self.db_filepaths: #generate as many objects as there are databases to query
             self.query_ojects.append(FDBQuery(item))
 
-        self.soundnotifinstance = SoundNotificator()
+        if self.wants_sound_notifications:
+            self.soundnotifinstance = SoundNotificator()
+            if self.config.getboolean('clipfdb', 'use_paplay'):
+                self.soundnotifinstance.prefer_paplay = True
+            self.soundnotifinstance.init_vars(\
+            os.path.expanduser(self.config.get('clipfdb', 'success_sound')), \
+            os.path.expanduser(self.config.get('clipfdb', 'failure_sound')))
+
+
+
+    def init_config(self):
+        conf_dir = os.path.dirname(os.path.realpath(__file__))
+        conf_file = conf_dir + "/clipfdb.conf" #TODO: make config path configurable (need argv?)
+
+        config_defaults = {"db_filepaths": "", # list of paths to databses files
+                           "security2_path": "", # absolute path to security2.fdb
+                           "notifications": "yes",
+                           "use_notify_send": "no", # prefer using notify-send instead of notify2
+                           "sound_notifications": "yes",
+                           "use_paplay": "no", # prefer using paplay instead of simpleaudio
+                           "terminal_output": "no", # output query results to stdout
+                           "success_sound": "", # absolute path to success sound file
+                           "failure_sound": "" # absolute path to failure sound file
+                          }
+
+        config = configparser.SafeConfigParser(config_defaults)
+        config.add_section('clipfdb')
+        result = config.read(conf_file)
+        if not result:
+            print("Error trying to load the config file!")
+        return config
 
 
     def setup_environmentvars(self, path):
@@ -61,7 +107,8 @@ class FDBEmbedded():
         # os.environ['FIREBIRD'] = '~/INSTALLED/VVV-1.3.0-x86_64/firebird'
         # Alternatively, use a copy of the security2.fdb in that path:
         os.environ['FIREBIRD'] = path
-        setlocale(LC_ALL, "")
+        setlocale(LC_ALL, "") #TODO: add to config options for sorting?
+
         return True
 
 
@@ -82,9 +129,13 @@ class FDBEmbedded():
             if not queryobj.is_disabled:
                 self.get_set_from_result(queryobj)
 
+        # notifications:
+        for queryobj in self.query_ojects:
             if queryobj.is_active and not queryobj.is_disabled:
-                self.notifyinstance.init_send_notification(queryobj)
-                self.soundnotifinstance.init_send_sound(queryobj)
+                if self.wants_notifications:
+                    self.notifyinstance.init_send_notification(queryobj)
+                if self.wants_sound_notifications:
+                    self.soundnotifinstance.init_send_sound(queryobj)
 
 
 
@@ -120,7 +171,8 @@ class FDBEmbedded():
     def get_set_from_result(self, queryobj):
         """Search our FDB for word
         returns set(found_list), int(found_count)"""
-        print("\nget_set_from_result(): looking for: |" + queryobj.response_dict['original_query'] + "|\n")
+
+        # print("DEBUG get_set_from_result(): looking for: |" + queryobj.response_dict['original_query'] + "|")
         found_list = list()
         found_count = 0
         # con1 = services.connect(user='sysdba', password='masterkey')
@@ -150,14 +202,14 @@ class FDBEmbedded():
             cur.execute(select_stmt)
 
             for row in cur:
-                print(BColors.OKGREEN + "FDB found: " + row[0] + " " + str(row[1]) + BColors.ENDC)
+                # print(BColors.OKGREEN + "DEBUG FDB found: " + row[0] + " " + str(row[1]) + BColors.ENDC)
                 found_list.append((row[0], row[1]))
                 found_count += 1
                 if found_count > 20: #maximum results returned
                     break
 
             # found_list.sort(key=itemgetter(0, 1)) #sort alphabetically, then by size, but ignore case
-            found_list.sort(key=self.locale_keyfunc(operator.itemgetter(0))) #sort alphabetically, CI
+            found_list.sort(key=self.locale_keyfunc(itemgetter(0))) #sort alphabetically, CI
             # print(BColors.OKGREEN + "DEBUG found_count: " + str(found_count) + BColors.ENDC)
             # print(BColors.OKGREEN + "DEBUG found_list: " + str(found_list) + BColors.ENDC)
             con.close()
@@ -170,12 +222,31 @@ class FDBEmbedded():
             print(BColors.FAIL + errormesg + BColors.ENDC)
             queryobj.is_disabled = True
 
+        if self.wants_terminal_output:
+            self.print_to_stdout(queryobj)
+
 
     def locale_keyfunc(self, keyfunc):
         """use Locale for sorting"""
         def locale_wrapper(obj):
             return strxfrm(keyfunc(obj))
         return locale_wrapper
+
+
+    def print_to_stdout(self, queryobj):
+        """do pretty text output"""
+        found_list = ""
+        if queryobj.response_dict['count'] > 0:
+            for item, size in queryobj.response_dict['found_words']:
+                found_list += item + "\t" + bytes_2_human_readable(size) + "\n"
+                color = BColors.OKGREEN
+        else:
+            color = BColors.FAIL
+        print("Found " + color + str(queryobj.response_dict['count']) + BColors.ENDC + \
+              " for \'" + BColors.BOLD \
+              + queryobj.response_dict['original_query'] + "\'" + BColors.ENDC \
+              + " in " + BColors.BOLD + queryobj.db_filename + BColors.ENDC + "\n" \
+              + color + found_list + BColors.ENDC)
 
 # if __name__ == "__main__":
 #     OBJ = FDBquery()
@@ -230,6 +301,7 @@ class Notifier2():
         if NOTIFY2_AVAIL:
             notify2.init("clipboard")
         self.timeout = 5000
+        self.prefer_notify_send = False
         # DEBUG
         # info = notify2.get_server_info()
         # caps = notify2.get_server_caps()
@@ -239,7 +311,7 @@ class Notifier2():
 
     def init_send_notification(self, obj):
         """choose between libnotify2 or notify-send depending on import resulsts"""
-        if NOTIFY2_AVAIL:
+        if NOTIFY2_AVAIL and not self.prefer_notify_send:
             self.notify2_notify(obj)
         else:
             self.notify_send_wrapper(obj)
@@ -247,18 +319,15 @@ class Notifier2():
 
     def notify2_notify(self, obj):
         """sends dictionary['found_words'] to notification server"""
-        if not NOTIFY2_AVAIL:
-            return
 
         found_words = ""
         for item, size in obj.response_dict['found_words']:
-            found_words += item + " " + self.bytes_2_human_readable(size) + "\n"
+            found_words += item + " " + bytes_2_human_readable(size) + "\n"
         count = obj.response_dict['count']
         summary = "Found: " + str(count) + " for " + \
         obj.response_dict['original_query'] + " in " + obj.db_filename
-        formatted_msg = found_words
         notif = notify2.Notification(summary,
-                                     formatted_msg,
+                                     found_words,
                                      "dialog-information" # Icon name in /usr/share/icons/
                                     )
         notif.timeout = self.timeout #show for 5 seconds
@@ -275,47 +344,26 @@ class Notifier2():
 
 
 
-    def bytes_2_human_readable(self, number_of_bytes):
-        if number_of_bytes < 0:
-            raise ValueError("!!! number_of_bytes can't be smaller than 0 !!!")
 
-        step_to_greater_unit = 1024.
-
-        number_of_bytes = float(number_of_bytes)
-        unit = 'bytes'
-
-        if (number_of_bytes / step_to_greater_unit) >= 1:
-            number_of_bytes /= step_to_greater_unit
-            unit = 'KB'
-
-        if (number_of_bytes / step_to_greater_unit) >= 1:
-            number_of_bytes /= step_to_greater_unit
-            unit = 'MB'
-
-        if (number_of_bytes / step_to_greater_unit) >= 1:
-            number_of_bytes /= step_to_greater_unit
-            unit = 'GB'
-
-        if (number_of_bytes / step_to_greater_unit) >= 1:
-            number_of_bytes /= step_to_greater_unit
-            unit = 'TB'
-
-        precision = 1
-        number_of_bytes = round(number_of_bytes, precision)
-
-        return str(number_of_bytes) + ' ' + unit
 
 
     def notify_send_wrapper(self, obj):
         """Fallback method in case notify2 couldn't be imported
         sends dictionary['valid_words', 'count', 'original_word'] to notify-send"""
 
-        #FIXME: add summary and formatting like notify2
-        strings = ', '.join(str(e) for e in obj.response_dict['found_words'])
+        if obj.response_dict['count'] > 0:
+            category = 'fdb_query_found'
+        else:
+            category = 'fdb_query_notfound'
 
-        print("STRINGS: ", strings)
+        found_words = ""
+        summary = "For " + obj.response_dict['original_query'] + " in " + obj.db_filename
+
+        for item, size in obj.response_dict['found_words']:
+            found_words += item + " " + bytes_2_human_readable(size) + "\n"
+
         try:
-            cmd = ['notify-send', strings]
+            cmd = ['notify-send', '-c', category, '-i', 'dialog-information', summary, found_words ]
             # subprocess_call = subprocess.Popen(cmd, shell=,False, stdout=logfile, stderr=logfile)
             subprocess_call = subprocess.Popen(cmd, shell=False, \
             stdout=None, stderr=None)
@@ -335,35 +383,25 @@ class SoundNotificator():
     """Plays a sound after query"""
 
     def __init__(self):
-        # try:
-        #     import pyglet
-        #     PYGLET_AVAIL = True
-        # except ImportError:
-        #     PYGLET_AVAIL = False
-        # if PYGLET_AVAIL:
-        #     self.success_sound = pyglet.media.load('/home/nupupun/Music/sfx/256113__nckn__done.wav', streaming=False)
-        #     self.failure_sound = pyglet.media.load('/home/nupupun/Music/sfx/steamworlddig2/bounce.wav', streaming=False)
-        if SA_AVAIL:
-            self.success_sound = simpleaudio.WaveObject.from_wave_file("/home/nupupun/Music/sfx/256113__nckn__done.wav")
-            self.failure_sound = simpleaudio.WaveObject.from_wave_file("/home/nupupun/Music/sfx/interaction_fail_lowershorter.wav")
+        self.prefer_paplay = False
+        self.success_sound = ""
+        self.failure_sound = ""
+
+    def init_vars(self, success_sound, failure_sound):
+        """initializes sound file paths in vars"""
+        if SA_AVAIL and not self.prefer_paplay:
+            self.success_sound = simpleaudio.WaveObject.from_wave_file(success_sound)
+            self.failure_sound = simpleaudio.WaveObject.from_wave_file(failure_sound)
         else:
-            self.success_sound = "/home/nupupun/Music/sfx/256113__nckn__done.wav"
-            self.failure_sound = "/home/nupupun/Music/sfx/interaction_fail_lowershorter.wav" 
+            self.success_sound = success_sound
+            self.failure_sound = failure_sound
 
     def init_send_sound(self, obj):
         """devide what to use"""
-        if SA_AVAIL:
+        if SA_AVAIL and not self.prefer_paplay:
             self.sa_method(obj)
         else:
             self.paplay_method(obj)
-
-
-    def pyglet_method(self, obj):
-        """deprecated because too resource intensive and crashes"""
-        if not obj.response_dict['count']:
-            self.failure_sound.play()
-        else:
-            self.success_sound.play()
 
 
     def sa_method(self, obj):
@@ -396,3 +434,35 @@ class SoundNotificator():
             print("Exception paplay_method(): " + str(e))
             return 1
         return 1
+
+
+# UTILS
+def bytes_2_human_readable(number_of_bytes):
+    if number_of_bytes < 0:
+        raise ValueError("!!! number_of_bytes can't be smaller than 0 !!!")
+
+    step_to_greater_unit = 1024.
+
+    number_of_bytes = float(number_of_bytes)
+    unit = 'bytes'
+
+    if (number_of_bytes / step_to_greater_unit) >= 1:
+        number_of_bytes /= step_to_greater_unit
+        unit = 'KB'
+
+    if (number_of_bytes / step_to_greater_unit) >= 1:
+        number_of_bytes /= step_to_greater_unit
+        unit = 'MB'
+
+    if (number_of_bytes / step_to_greater_unit) >= 1:
+        number_of_bytes /= step_to_greater_unit
+        unit = 'GB'
+
+    if (number_of_bytes / step_to_greater_unit) >= 1:
+        number_of_bytes /= step_to_greater_unit
+        unit = 'TB'
+
+    precision = 1
+    number_of_bytes = round(number_of_bytes, precision)
+
+    return str(number_of_bytes) + ' ' + unit
