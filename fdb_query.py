@@ -54,7 +54,7 @@ class FDBEmbedded():
             return # no use using us!
 
         # self.repattern_tumblr_full = re.compile(r'(tumblr_.*_).*\..*') #eg (tumblr_abcdeo1_)raw.jpg
-        self.repattern_tumblr = re.compile(r'(tumblr_.*o)[1-10]+_.*\..*', re.I) #eg (tumblr_abcdeo)10_raw.jpg
+        self.repattern_tumblr = re.compile(r'(tumblr_.*o)[1-9]+_.*\..*', re.I) #eg (tumblr_abcdeo)10_raw.jpg
         self.repattern_tumblr_inline = re.compile(r'(tumblr_inline_.*)_.{3,4}.*', re.I) #eg (tumblr_inline_abcdeo)_540.jpg
 
         # initialize objects instances
@@ -81,8 +81,8 @@ class FDBEmbedded():
     def init_config(self):
         conf_dir = os.path.dirname(os.path.realpath(__file__))
         conf_file = conf_dir + os.sep + "clipfdb.conf" #TODO: make config path configurable (need argv?)
-	successsound = conf_dir + os.sep + sounds + os.sep + "340259__kaboose102__blippy-02_short.wav"
-	failuresound = conf_dir + os.sep + sounds + os.sep + "340259__kaboose102__blippy-01_short.wav"
+        successsound = conf_dir + os.sep + 'sounds' + os.sep + '340259__kaboose102__blippy-02_short.wav'
+        failuresound = conf_dir + os.sep + 'sounds' + os.sep + '340259__kaboose102__blippy-01_short.wav'
         config_defaults = {"db_filepaths": "", # list of paths to databses files
                            "security2_path": "", # absolute path to security2.fdb
                            "notifications": "yes",
@@ -342,10 +342,6 @@ class Notifier2():
             notif.show()
         except Exception as e:
             print("Exception while notif.show():" + str(e))
-
-
-
-
 
 
     def notify_send_wrapper(self, obj):
