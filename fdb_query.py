@@ -124,10 +124,10 @@ class FDBEmbedded():
 
         parsed_content = self.parse_clipboard_content(board_content)
 
+        
         for queryobj in self.query_ojects:
-            queryobj.response_dict['original_query'] = parsed_content
-
             if not queryobj.is_disabled:
+                queryobj.response_dict['original_query'] = parsed_content
                 self.get_set_from_result(queryobj)
 
         # notifications:
@@ -161,9 +161,13 @@ class FDBEmbedded():
                     if reresult:
                         result = reresult.group(1)
             # if "https://" in board_content or "http://" in board_content:
-            elif result.find("http") or result.find("https"):
+            elif result.find("http://") or result.find("https://"):
                 #select only last item with extension
                 result = result.split("/")[-1].split(".")[0]
+            if result is '':
+                for queryobj in self.query_ojects:
+                    queryobj.is_disabled = True
+                return
 
             return result
 
