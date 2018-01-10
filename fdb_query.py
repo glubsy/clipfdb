@@ -19,9 +19,14 @@ try:
         NOTIFY2_AVAIL = True
     except ImportError:
         NOTIFY2_AVAIL = False
+
+    try:
+        import simpleaudio
+        SA_AVAIL = True
+    except ImportError:
+        SA_AVAIL = False
 except ImportError:
     FDB_AVAILABLE = False
-
 
 class FDBEmbedded():
     """Handles querying VVV firebird databases locally"""
@@ -47,6 +52,7 @@ class FDBEmbedded():
         for item in self.db_filepaths: #generate as many objects as there are databases to query
             self.query_ojects.append(FDBQuery(item))
 
+        self.soundnotifinstance = SoundNotificator()
 
 
     def setup_environmentvars(self, path):
@@ -78,6 +84,7 @@ class FDBEmbedded():
 
             if queryobj.is_active and not queryobj.is_disabled:
                 self.notifyinstance.init_send_notification(queryobj)
+                self.soundnotifinstance.init_send_sound(queryobj)
 
 
 
@@ -222,6 +229,7 @@ class Notifier2():
     def __init__(self):
         if NOTIFY2_AVAIL:
             notify2.init("clipboard")
+        self.timeout = 5000
         # DEBUG
         # info = notify2.get_server_info()
         # caps = notify2.get_server_caps()
@@ -253,7 +261,7 @@ class Notifier2():
                                      formatted_msg,
                                      "dialog-information" # Icon name in /usr/share/icons/
                                     )
-        notif.timeout = 30000 #show for 30 seconds
+        notif.timeout = self.timeout #show for 5 seconds
         # Set categories for notif server to display special colours and stuffs
         if count > 0:
             notif.set_category('fdb_query_found')
@@ -318,5 +326,73 @@ class Notifier2():
             return ret_code
         except Exception as e:
             print("Exception notifier_send_wrapper(): " + str(e))
+            return 1
+        return 1
+
+
+
+class SoundNotificator():
+    """Plays a sound after query"""
+
+    def __init__(self):
+        # try:
+        #     import pyglet
+        #     PYGLET_AVAIL = True
+        # except ImportError:
+        #     PYGLET_AVAIL = False
+        # if PYGLET_AVAIL:
+        #     self.success_sound = pyglet.media.load('/home/nupupun/Music/sfx/256113__nckn__done.wav', streaming=False)
+        #     self.failure_sound = pyglet.media.load('/home/nupupun/Music/sfx/steamworlddig2/bounce.wav', streaming=False)
+        if SA_AVAIL:
+            self.success_sound = simpleaudio.WaveObject.from_wave_file("/home/nupupun/Music/sfx/256113__nckn__done.wav")
+            self.failure_sound = simpleaudio.WaveObject.from_wave_file("/home/nupupun/Music/sfx/interaction_fail_lowershorter.wav")
+        else:
+            self.success_sound = "/home/nupupun/Music/sfx/256113__nckn__done.wav"
+            self.failure_sound = "/home/nupupun/Music/sfx/interaction_fail_lowershorter.wav" 
+
+    def init_send_sound(self, obj):
+        """devide what to use"""
+        if SA_AVAIL:
+            self.sa_method(obj)
+        else:
+            self.paplay_method(obj)
+
+
+    def pyglet_method(self, obj):
+        """deprecated because too resource intensive and crashes"""
+        if not obj.response_dict['count']:
+            self.failure_sound.play()
+        else:
+            self.success_sound.play()
+
+
+    def sa_method(self, obj):
+        """use simpleaudio to play sound"""
+        if not obj.response_dict['count']:
+            play_obj = self.failure_sound.play()
+            play_obj.wait_done()
+        else:
+            play_obj = self.success_sound.play()
+            play_obj.wait_done()
+
+
+    def paplay_method(self, obj):
+        """fallback method using paplay"""
+        if not obj.response_dict['count']:
+            argz = self.failure_sound
+        else:
+            argz = self.success_sound
+        try:
+            cmd = ['paplay', argz]
+            # subprocess_call = subprocess.Popen(cmd, shell=,False, stdout=logfile, stderr=logfile)
+            subprocess_call = subprocess.Popen(cmd, shell=False, \
+            stdout=None, stderr=None)
+            out, err = subprocess_call.communicate()
+            # ret_code = subprocess_call.wait()
+            ret_code = subprocess_call.wait()
+            # print("paplay_method() return code: " + str(ret_code))
+            return ret_code
+        except Exception as e:
+            print("Exception paplay_method(): " + str(e))
             return 1
         return 1
