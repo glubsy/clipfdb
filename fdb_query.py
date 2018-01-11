@@ -9,6 +9,7 @@ from operator import itemgetter
 from locale import setlocale, strxfrm, LC_ALL
 import configparser
 # from ast import literal_eval
+from urllib import parse
 
 from constants import BColors
 try:
@@ -160,7 +161,7 @@ class FDBEmbedded():
                     reresult = self.repattern_tumblr_inline.search(board_content)
                     if reresult: # matches inline url
                         result = reresult.group(1)
-            result = self.strip_http_keep_filename_noext(result)
+            result = strip_http_keep_filename_noext(result)
             if result is '':
                 for queryobj in self.query_ojects:
                     queryobj.is_disabled = True
@@ -168,11 +169,6 @@ class FDBEmbedded():
 
             return result
 
-    def strip_http_keep_filename_noext(self, mystring):
-        """if contains http(s), splits url and keeps last item without extension"""
-        if mystring.find("http://") or mystring.find("https://"):
-            return mystring.split("/")[-1].split(".")[0]
-        return mystring
 
     def get_set_from_result(self, queryobj):
         """Search our FDB for word
@@ -468,3 +464,28 @@ def bytes_2_human_readable(number_of_bytes):
     number_of_bytes = round(number_of_bytes, precision)
 
     return str(number_of_bytes) + ' ' + unit
+
+
+def isolate_filename_noext(url):
+    """remove url, keep file with no ext"""
+
+    fullurl = url[url.rfind("/")+1:]
+    # return os.path.basename(fullurl)
+    fullurl = parse.unquote(fullurl, encoding='utf-8', errors='replace')
+    return os.path.splitext(fullurl)[0]
+
+
+def isolate_filename(url):
+    """remove url, keep file with no ext"""
+
+    fullurl = url[url.rfind("/")+1:]
+    # return os.path.basename(fullurl)
+    fullurl = parse.unquote(fullurl, encoding='utf-8', errors='replace')
+    return fullurl
+
+
+def strip_http_keep_filename_noext(mystring):
+    """if contains http(s), splits url and keeps last item without extension"""
+    if mystring.find("http://") or mystring.find("https://"):
+        return mystring.split("/")[-1].split(".")[0]
+    return mystring
