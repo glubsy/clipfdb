@@ -124,7 +124,7 @@ class FDBEmbedded():
 
         parsed_content = self.parse_clipboard_content(board_content)
 
-        
+
         for queryobj in self.query_ojects:
             if not queryobj.is_disabled:
                 queryobj.response_dict['original_query'] = parsed_content
@@ -154,16 +154,13 @@ class FDBEmbedded():
             result = board_content
             if "tumblr" in board_content:
                 reresult = self.repattern_tumblr.search(board_content)
-                if reresult: #matches
+                if reresult: # matches regular tumblr url
                     result = reresult.group(1)
                 else:
                     reresult = self.repattern_tumblr_inline.search(board_content)
-                    if reresult:
+                    if reresult: # matches inline url
                         result = reresult.group(1)
-            # if "https://" in board_content or "http://" in board_content:
-            elif result.find("http://") or result.find("https://"):
-                #select only last item with extension
-                result = result.split("/")[-1].split(".")[0]
+            result = self.strip_http_keep_filename_noext(result)
             if result is '':
                 for queryobj in self.query_ojects:
                     queryobj.is_disabled = True
@@ -171,7 +168,11 @@ class FDBEmbedded():
 
             return result
 
-
+    def strip_http_keep_filename_noext(self, mystring):
+        """if contains http(s), splits url and keeps last item without extension"""
+        if mystring.find("http://") or mystring.find("https://"):
+            return mystring.split("/")[-1].split(".")[0]
+        return mystring
 
     def get_set_from_result(self, queryobj):
         """Search our FDB for word
