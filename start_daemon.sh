@@ -36,7 +36,7 @@ start() {
 stop() {
     # `kill -0 pid` returns successfully if the pid is running, but does not
     # actually kill it.
-    kill -0 $1 && kill $1
+    kill -0 $1 && kill -SIGUSR1 $1 # to emit sound on termination
     rm "$pid_file"
     #echo "stopped"
 }

@@ -715,6 +715,7 @@ class Daemon(object):
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, self.exit)
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGTERM, self.exit)
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGHUP, self.exit)
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, self.fdbquery.signal_handler)
 
         # Timeout for flushing history to disk
         # Do nothing if timeout is 0, or write_on_change is set in config

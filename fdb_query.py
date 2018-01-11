@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import os
+import sys
 import re
 # from fdb import services
 import subprocess
@@ -8,6 +9,7 @@ import subprocess
 from operator import itemgetter
 from locale import setlocale, strxfrm, LC_ALL
 import configparser
+import signal
 # from ast import literal_eval
 from urllib import parse
 
@@ -75,15 +77,20 @@ class FDBEmbedded():
                 self.soundnotifinstance.prefer_paplay = True
             self.soundnotifinstance.init_vars(\
             os.path.expanduser(self.config.get('clipfdb', 'success_sound')), \
-            os.path.expanduser(self.config.get('clipfdb', 'failure_sound')))
-
-
+            os.path.expanduser(self.config.get('clipfdb', 'failure_sound')),
+            os.path.expanduser(self.config.get('clipfdb', 'startup_sound')),
+            os.path.expanduser(self.config.get('clipfdb', 'shutdown_sound')))
+            if self.wants_sound_notifications:
+                self.soundnotifinstance.init_startup_sound("startup")
 
     def init_config(self):
+        """parse config and initialize options accordingly"""
         conf_dir = os.path.dirname(os.path.realpath(__file__))
         conf_file = conf_dir + os.sep + "clipfdb.conf" #TODO: make config path configurable (need argv?)
         successsound = conf_dir + os.sep + 'sounds' + os.sep + '340259__kaboose102__blippy-02_short.wav'
         failuresound = conf_dir + os.sep + 'sounds' + os.sep + '340259__kaboose102__blippy-01_short.wav'
+        startupsound = conf_dir + os.sep + 'sounds' + os.sep + '146718__fins__button_lower.wav'
+        shutdownsound = conf_dir + os.sep + 'sounds' + os.sep + '321103__nsstudios__blip1.wav'
         config_defaults = {"db_filepaths": "", # list of paths to databses files
                            "security2_path": "", # absolute path to security2.fdb
                            "notifications": "yes",
@@ -92,7 +99,9 @@ class FDBEmbedded():
                            "use_paplay": "no", # prefer using paplay instead of simpleaudio
                            "terminal_output": "no", # output query results to stdout
                            "success_sound": successsound, # absolute path to success sound file
-                           "failure_sound": failuresound # absolute path to failure sound file
+                           "failure_sound": failuresound, # absolute path to failure sound file
+                           "startup_sound": startupsound, # absolute path to startup sound file
+                           "shutdown_sound": shutdownsound # absolute path to shutdown sound file
                           }
 
         config = configparser.SafeConfigParser(config_defaults)
@@ -101,6 +110,15 @@ class FDBEmbedded():
         if not result:
             print("Error trying to load the config file!")
         return config
+
+
+    def signal_handler(self): # Called from Clipster
+        """Handles SIGINT signal, blocks it to terminate gracefully
+        after the current download has finished"""
+        # print("Terminating script!")
+        if self.wants_sound_notifications:
+            self.soundnotifinstance.init_startup_sound("shutdown")
+        sys.exit(0)
 
 
     def setup_environmentvars(self, path):
@@ -162,7 +180,7 @@ class FDBEmbedded():
                     if reresult: # matches inline url
                         result = reresult.group(1)
             result = strip_http_keep_filename_noext(result)
-            if result is '':
+            if result == '':
                 for queryobj in self.query_ojects:
                     queryobj.is_disabled = True
                 return
@@ -291,6 +309,7 @@ class FDBQuery():
         self.response_dict = {'found_words': '', 'count': '', 'original_query': ''}
 
     def activate(self):
+        """ reset object state"""
         self.response_dict = {'found_words': '', 'count': '', 'original_query': ''}
         self.is_active = True
         self.is_disabled = False
@@ -361,14 +380,13 @@ class Notifier2():
             found_words += item + " " + bytes_2_human_readable(size) + "\n"
 
         try:
-            cmd = ['notify-send', '-c', category, '-i', 'dialog-information', summary, found_words ]
+            cmd = ['notify-send', '-c', category, '-i', 'dialog-information', summary, found_words]
             # subprocess_call = subprocess.Popen(cmd, shell=,False, stdout=logfile, stderr=logfile)
             subprocess_call = subprocess.Popen(cmd, shell=False, \
             stdout=None, stderr=None)
-            out, err = subprocess_call.communicate()
-            # ret_code = subprocess_call.wait()
-            ret_code = subprocess_call.wait()
-            print("notifier_send_wrapper() return code: " + str(ret_code))
+            # out, err = subprocess_call.communicate()
+            ret_code = subprocess_call.wait() #FIXME: maybe not needed and slows down?
+            # print("DEBUG notifier_send_wrapper() return code: " + str(ret_code))
             return ret_code
         except Exception as e:
             print("Exception notifier_send_wrapper(): " + str(e))
@@ -384,48 +402,64 @@ class SoundNotificator():
         self.prefer_paplay = False
         self.success_sound = ""
         self.failure_sound = ""
+        self.startup_sound = ""
+        self.shutdown_sound = ""
 
-    def init_vars(self, success_sound, failure_sound):
+    def init_vars(self, success_sound, failure_sound, startup_sound, shutdown_sound):
         """initializes sound file paths in vars"""
         if SA_AVAIL and not self.prefer_paplay:
             self.success_sound = simpleaudio.WaveObject.from_wave_file(success_sound)
             self.failure_sound = simpleaudio.WaveObject.from_wave_file(failure_sound)
+            self.startup_sound = simpleaudio.WaveObject.from_wave_file(startup_sound)
+            self.shutdown_sound = simpleaudio.WaveObject.from_wave_file(shutdown_sound)
         else:
             self.success_sound = success_sound
             self.failure_sound = failure_sound
+            self.startup_sound = startup_sound
+            self.shutdown_sound = shutdown_sound
+
+
+    def init_startup_sound(self, state):
+        """start / stop sound"""
+        if state == "startup":
+            sound_type = self.startup_sound
+        else:
+            sound_type = self.shutdown_sound
+        if SA_AVAIL and not self.prefer_paplay:
+            self.sa_method(sound_type)
+        else:
+            self.paplay_method(sound_type)
+
 
     def init_send_sound(self, obj):
         """devide what to use"""
         if SA_AVAIL and not self.prefer_paplay:
-            self.sa_method(obj)
+            if not obj.response_dict['count']:
+                self.sa_method(self.failure_sound)
+            else:
+                self.sa_method(self.success_sound)
         else:
-            self.paplay_method(obj)
+            if not obj.response_dict['count']:
+                self.paplay_method(self.failure_sound)
+            else:
+                self.paplay_method(self.success_sound)
 
 
-    def sa_method(self, obj):
+    def sa_method(self, sound_obj):
         """use simpleaudio to play sound"""
-        if not obj.response_dict['count']:
-            play_obj = self.failure_sound.play()
-            play_obj.wait_done()
-        else:
-            play_obj = self.success_sound.play()
-            play_obj.wait_done()
+        play_obj = sound_obj.play()
+        play_obj.wait_done()
 
 
-    def paplay_method(self, obj):
+    def paplay_method(self, sound_obj):
         """fallback method using paplay"""
-        if not obj.response_dict['count']:
-            argz = self.failure_sound
-        else:
-            argz = self.success_sound
         try:
-            cmd = ['paplay', argz]
+            cmd = ['paplay', sound_obj]
             # subprocess_call = subprocess.Popen(cmd, shell=,False, stdout=logfile, stderr=logfile)
             subprocess_call = subprocess.Popen(cmd, shell=False, \
             stdout=None, stderr=None)
-            out, err = subprocess_call.communicate()
-            # ret_code = subprocess_call.wait()
-            ret_code = subprocess_call.wait()
+            # out, err = subprocess_call.communicate()
+            ret_code = subprocess_call.wait() #FIXME: maybe not needed and slows down?
             # print("paplay_method() return code: " + str(ret_code))
             return ret_code
         except Exception as e:
@@ -436,6 +470,7 @@ class SoundNotificator():
 
 # UTILS
 def bytes_2_human_readable(number_of_bytes):
+    """Converts bytes into KB/MB/GB/TB depending on value"""
     if number_of_bytes < 0:
         raise ValueError("!!! number_of_bytes can't be smaller than 0 !!!")
 
