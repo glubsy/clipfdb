@@ -348,15 +348,15 @@ class Notifier2():
         summary = "Found: " + str(count) + " for " + \
         obj.response_dict['original_query'] + " in " + obj.db_filename
         notif = notify2.Notification(summary,
-                                     found_words,
-                                     "dialog-information" # Icon name in /usr/share/icons/
+                                     found_words
+                                     # "dialog-information" # Icon name in /usr/share/icons/
                                     )
         notif.timeout = self.timeout #show for 5 seconds
         # Set categories for notif server to display special colours and stuffs
         if count > 0:
-            notif.set_category('fdb_query_found')
+            notif.set_category('clipfdb_found')
         else:
-            notif.set_category('fdb_query_notfound')
+            notif.set_category('clipfdb_notfound')
         #notif.set_location(800, 600) #not supported by dunst
         try:
             notif.show()
@@ -369,9 +369,9 @@ class Notifier2():
         sends dictionary['valid_words', 'count', 'original_word'] to notify-send"""
 
         if obj.response_dict['count'] > 0:
-            category = 'fdb_query_found'
+            category = 'clipfdb_found'
         else:
-            category = 'fdb_query_notfound'
+            category = 'clipfdb_notfound'
 
         found_words = ""
         summary = "For " + obj.response_dict['original_query'] + " in " + obj.db_filename
@@ -380,7 +380,8 @@ class Notifier2():
             found_words += item + " " + bytes_2_human_readable(size) + "\n"
 
         try:
-            cmd = ['notify-send', '-c', category, '-i', 'dialog-information', summary, found_words]
+            # cmd = ['notify-send', '-c', category, '-i', 'dialog-information', summary, found_words]
+            cmd = ['notify-send', '-c', category, summary, found_words]
             # subprocess_call = subprocess.Popen(cmd, shell=,False, stdout=logfile, stderr=logfile)
             subprocess_call = subprocess.Popen(cmd, shell=False, \
             stdout=None, stderr=None)
