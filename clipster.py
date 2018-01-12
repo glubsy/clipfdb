@@ -86,102 +86,6 @@ class ClipsterError(Exception):
         Exception.__init__(self, args)
 
 
-class Client(object):
-    """Clipboard Manager."""
-
-    def __init__(self, config, args):
-        self.config = config
-        self.args = args
-        self.client_action = "SEND"
-        if args.select:
-            self.client_action = "SELECT"
-        elif args.ignore:
-            self.client_action = "IGNORE"
-        elif args.delete is not None:
-            self.client_action = "DELETE"
-        elif args.erase_entire_board:
-            self.client_action = "ERASE"
-        elif args.output or args.search is not None:
-            self.client_action = "BOARD"
-        logging.debug("client_action: %s", self.client_action)
-
-    def update(self):
-        """Send a signal and (optional) data from STDIN to daemon socket."""
-
-        logging.debug("Connecting to server to update.")
-        with closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as sock:
-            # pylint doesn't like contextlib.closing (https://github.com/PyCQA/astroid/issues/347)
-            # pylint:disable=no-member
-            try:
-                sock.connect(self.config.get('clipster', "socket_file"))
-            except (socket.error, OSError):
-                raise ClipsterError("Error connecting to socket. Is daemon running?")
-            logging.debug("Sending request to server.")
-            # Fix for http://bugs.python.org/issue1633941 in py 2.x
-            # Send message 'header' - count is 0 (i.e to be ignored)
-            sock.sendall("{0}:{1}:0".format(self.client_action,
-                                            self.config.get('clipster',
-                                                            'default_selection')).encode('utf-8'))
-
-            if self.client_action == "DELETE":
-                # Send delete args
-                sock.sendall(":{0}".format(self.args.delete).encode('utf-8'))
-
-            if self.client_action == "SEND":
-                # Send data read from stdin
-                buf_size = 8192
-                # Send another colon to show that content is coming
-                # Needed to distinguish empty content from no content
-                # e.g. when stdin is empty
-                sock.sendall(":".encode('utf-8'))
-                while True:
-                    if sys.stdin.isatty():
-                        recv = sys.stdin.readline(buf_size)
-                    else:
-                        recv = sys.stdin.read(buf_size)
-                    if not recv:
-                        break
-                    recv = safe_decode(recv)
-                    sock.sendall(recv.encode('utf-8'))
-
-    def output(self):
-        """Send a signal and count to daemon socket requesting items from history."""
-
-        logging.debug("Connecting to server to query history.")
-        with closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as sock:
-            # pylint doesn't like contextlib.closing (https://github.com/PyCQA/astroid/issues/347)
-            # pylint:disable=no-member
-            try:
-                sock.connect(self.config.get('clipster', "socket_file"))
-            except socket.error:
-                raise ClipsterError("Error connecting to socket. Is daemon running?")
-            logging.debug("Sending request to server.")
-            # Send message 'header'
-            message = "{0}:{1}:{2}".format(self.client_action,
-                                           self.config.get('clipster',
-                                                           'default_selection'),
-                                           self.args.number)
-            if self.args.search:
-                message = "{0}:{1}".format(message, self.args.search)
-            sock.sendall(message.encode('utf-8'))
-
-            sock.shutdown(socket.SHUT_WR)
-            data = []
-            while True:
-                try:
-                    recv = sock.recv(8192)
-                    logging.debug("Received data from server.")
-                    if not recv:
-                        break
-                    data.append(safe_decode(recv))
-                except socket.error:
-                    break
-        if data:
-            # data is a list of 1 or more parts of a json string.
-            # Reassemble this, then join with delimiter
-            return self.args.delim.join(json.loads(''.join(data)))
-
-
 class Daemon(object):
     """Handles clipboard events, client requests, stores history."""
 
@@ -704,8 +608,6 @@ class Daemon(object):
         self.window = Gtk.Window(type=Gtk.WindowType.POPUP)
 
         # Handle clipboard changes
-        self.p_id = self.primary.connect('owner-change',
-                                         self.owner_change)
         self.c_id = self.clipboard.connect('owner-change',
                                            self.owner_change)
         # Handle socket connections
@@ -774,7 +676,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def parse_config(args, data_dir, conf_dir):
+def parse_config(data_dir, conf_dir):
     """Configuration derived from defaults & file."""
 
     # Set some config defaults
@@ -806,8 +708,6 @@ def parse_config(args, data_dir, conf_dir):
     config.add_section('clipster')
 
     # Try to read config file (either passed in, or default value)
-    if args.config:
-        config.set('clipster', 'conf_dir', args.config)
     conf_file = os.path.join(config.get('clipster', 'conf_dir'), 'clipster.ini')
     logging.debug("Trying to read config file: %s", conf_file)
     result = config.read(conf_file)
@@ -844,36 +744,18 @@ def main():
     # Find default config and data dirs
     conf_dir, data_dir = find_config()
 
-    # parse command-line arguments
-    args = parse_args()
+    debug_arg = "DEBUG"
+    print("DEBUG SET!")
 
     # Enable logging
     logging.basicConfig(format='%(levelname)s:%(message)s',
-                        level=getattr(logging, args.log_level.upper()))
+                        level=debug_arg)
     logging.debug("Debugging Enabled.")
 
-    config = parse_config(args, data_dir, conf_dir)
+    config = parse_config(data_dir, conf_dir)
 
     # Launch the daemon
-    if args.daemon:
-        Daemon(config).run()
-    else:
-        board = args.primary or args.clipboard or config.get('clipster', 'default_selection')
-        if board not in config.get('clipster', 'active_selections'):
-            raise ClipsterError("{0} not in 'active_selections' in config.".format(board))
-        config.set('clipster', 'default_selection', board)
-        client = Client(config, args)
-
-        if args.output:
-            # Ask server for clipboard history
-            output = client.output()
-            if not isinstance(output, str):
-                # python2 needs unicode explicitly encoded
-                output = output.encode('utf-8')
-            print(output, end='')
-        else:
-            # Read from stdin and send to server
-            client.update()
+    Daemon(config).run()
 
 
 def safe_decode(data):
@@ -884,6 +766,16 @@ def safe_decode(data):
     except (UnicodeDecodeError, UnicodeEncodeError, AttributeError):
         pass
     return data
+
+def init():
+    """returns config to pass to Daemon"""
+    try:
+        conf_dir, data_dir = find_config()
+        return parse_config(data_dir, conf_dir)
+
+    except Exception as e:
+        print("Exception: " + str(e))
+
 
 if __name__ == "__main__":
     try:
