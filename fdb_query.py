@@ -10,6 +10,7 @@ from operator import itemgetter
 from locale import setlocale, strxfrm, LC_ALL
 import configparser
 import signal
+import clipster
 # from ast import literal_eval
 from urllib import parse
 
@@ -525,3 +526,14 @@ def strip_http_keep_filename_noext(mystring):
     if mystring.find("http://") or mystring.find("https://"):
         return mystring.split("/")[-1].split(".")[0]
     return mystring
+
+
+
+if __name__ == "__main__":
+    try:
+        clipster_config = clipster.init()
+        daemon = clipster.Daemon(clipster_config)
+        daemon.run()
+
+    except Exception as e:
+        print("Exception: " + str(e))
