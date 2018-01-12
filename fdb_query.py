@@ -208,13 +208,14 @@ class FDBEmbedded():
         # Create a Cursor object that operates in the context of Connection con:
         cur = con.cursor()
 
-        # we need to add an extra for SQL statements
+        # Add extra quote after single quote to escape for SQL statements
+        # and make it uppercase for case insensitive search
         if "'" in queryobj.response_dict['original_query']:
-            querystring = queryobj.response_dict['original_query'].replace("'", "''")
+            querystring = queryobj.response_dict['original_query'].replace("'", "''").upper()
+        else:
+            querystring = queryobj.response_dict['original_query'].upper()
 
-        querystring = queryobj.response_dict['original_query'].upper() # for case insensitive search
-
-        # adding UPPER for case insensitive
+        # adding UPPER for case insensitive search
         select_stmt = "select FILE_NAME, FILE_SIZE from FILES WHERE UPPER (FILE_NAME) LIKE '%" \
         + querystring + "%'"
 
@@ -306,11 +307,11 @@ class FDBQuery():
         self.is_disabled = True
         self.db_filepath = databasepath
         self.db_filename = databasepath.split("/")[-1]
-        self.response_dict = {'found_words': '', 'count': '', 'original_query': ''}
+        self.response_dict = {'found_words': '', 'count': int(), 'original_query': ''}
 
     def activate(self):
         """ reset object state"""
-        self.response_dict = {'found_words': '', 'count': '', 'original_query': ''}
+        self.response_dict = {'found_words': '', 'count': int(), 'original_query': ''}
         self.is_active = True
         self.is_disabled = False
 
