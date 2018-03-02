@@ -180,7 +180,6 @@ class FDBEmbedded():
                 result = parse.unquote(reresult.group(1))
 
             if "tumblr" in result:
-                print(BColors.OKGREEN + "found tummblr by itself" + BColors.ENDC)
                 reresult = self.repattern_tumblr.search(board_content)
                 if reresult: # matches regular tumblr url
                     result = reresult.group(1)
@@ -192,8 +191,18 @@ class FDBEmbedded():
             if result.endswith("/"):
                 result = result[:-1]
 
-            result = strip_http_keep_filename_noext(result)
-            if result == '':
+            # if result.find("http://") or result.find("https://"):
+            try:
+                parsedurl = parse.urlparse(result)
+                if parsedurl.scheme == "http" or parsedurl.scheme == "https":
+                    # prevent unquoting if not actual http url, might not be so useful
+                    result = parse.unquote_plus(parsedurl.path)
+            except Exception as e:
+                print(e)
+
+            result = result.split("/")[-1].split(".")[0]
+
+            if result == '' or len(result) < 4: #don't process if less than 4 chars
                 for queryobj in self.query_ojects:
                     queryobj.is_disabled = True
                 return
@@ -539,7 +548,6 @@ def strip_http_keep_filename_noext(mystring):
     if mystring.find("http://") or mystring.find("https://"):
         return mystring.split("/")[-1].split(".")[0]
     return mystring
-
 
 
 if __name__ == "__main__":
