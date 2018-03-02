@@ -46,7 +46,9 @@ Example below, disables icon, makes body bold and green / red on found / nothing
 
 # TODOs
 
-* Wipe out most of Clipster methods we don't need
+* Wipe out most of Clipster methods we don't need (branch clipster_clean)
+
+* Catch up with latest changes in clipster (blacklist, whitelist)
 
 * Better error handling (ie. invalid options)
 

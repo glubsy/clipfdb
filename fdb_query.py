@@ -60,6 +60,7 @@ class FDBEmbedded():
         # self.repattern_tumblr_full = re.compile(r'(tumblr_.*_).*\..*') #eg (tumblr_abcdeo1_)raw.jpg
         self.repattern_tumblr = re.compile(r'(tumblr_.*o)[1-9]+_.*\..*', re.I) #eg (tumblr_abcdeo)10_raw.jpg
         self.repattern_tumblr_inline = re.compile(r'(tumblr_inline_.*)_.{3,4}.*', re.I) #eg (tumblr_inline_abcdeo)_540.jpg
+        self.repattern_tumblr_redirect = re.compile(r't\.umblr\.com\/redirect\?z=(.*)&t=.*', re.I)
 
         # initialize objects instances
         if self.wants_notifications:
@@ -166,13 +167,20 @@ class FDBEmbedded():
 
         board_content = board_content.split("\n")[0] # we stop at the first newline found
         length = len(board_content)
-        if length < 4 or length > 180: #arbitrary 3 character long?
+        if length < 4: #arbitrary 3 character long?
             for queryobj in self.query_ojects:
                 queryobj.is_disabled = True #query is too short
             return
         else:
             result = board_content
-            if "tumblr" in board_content:
+            reresult = self.repattern_tumblr_redirect.search(board_content)
+            if reresult: #matches t.umblr redirects
+            #if "t.umblr.com/redirect" in board_content: 
+                #result = parse.unquote(result.split("?z=")[1].split("&t=")[0])
+                result = parse.unquote(reresult.group(1))
+
+            if "tumblr" in result:
+                print(BColors.OKGREEN + "found tummblr by itself" + BColors.ENDC)
                 reresult = self.repattern_tumblr.search(board_content)
                 if reresult: # matches regular tumblr url
                     result = reresult.group(1)
@@ -180,6 +188,10 @@ class FDBEmbedded():
                     reresult = self.repattern_tumblr_inline.search(board_content)
                     if reresult: # matches inline url
                         result = reresult.group(1)
+
+            if result.endswith("/"):
+                result = result[:-1]
+
             result = strip_http_keep_filename_noext(result)
             if result == '':
                 for queryobj in self.query_ojects:
