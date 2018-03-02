@@ -12,6 +12,7 @@ for matches in CLIPBOAD clipboad (Linux only).
 Files which have been found in the databases will be either printed to terminal (if started from one and config option is active)
 or/and simply display as a notification through your notification server (dunst, xfce4-notifyd, etc.) with optional sound effect.
 
+Note: config file is the same one as clipster (for now) in ~/.config/clipster/clipster.ini
 
 # Dependencies
 
@@ -47,8 +48,6 @@ Example below, disables icon, makes body bold and green / red on found / nothing
 # TODOs
 
 * Wipe out most of Clipster methods we don't need (branch clipster_clean)
-
-* Catch up with latest changes in clipster (blacklist, whitelist)
 
 * Better error handling (ie. invalid options)
 
