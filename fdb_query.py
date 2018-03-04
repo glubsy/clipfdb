@@ -191,14 +191,20 @@ class FDBEmbedded():
             if result.endswith("/"):
                 result = result[:-1]
 
-            # if result.find("http://") or result.find("https://"):
-            try:
-                parsedurl = parse.urlparse(result)
-                if parsedurl.scheme == "http" or parsedurl.scheme == "https":
-                    # prevent unquoting if not actual http url, might not be so useful
-                    result = parse.unquote_plus(parsedurl.path)
-            except Exception as e:
-                print(e)
+            # try:
+            #     parsedurl = parse.urlparse(result)
+            #     if parsedurl.scheme == "http" or parsedurl.scheme == "https":
+            #         # prevent unquoting if not actual http url, might not be so useful
+            #         result = parse.unquote_plus(parsedurl.path)
+            # except Exception as e:
+            #     print(e)
+
+            if result.find("http://") or result.find("https://"):
+                result = result.split("/")[-1]
+                if result.find("?"): #FIXME: more params possible here, only one hardcoded case!
+                    result = result.split("?image=")[-1]
+
+                result = parse.unquote_plus(result)
 
             result = result.split("/")[-1].split(".")[0]
 
