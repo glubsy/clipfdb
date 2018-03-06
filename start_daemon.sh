@@ -5,8 +5,9 @@
 # ./clipster.py -d
 
 script_home=$(dirname "$(realpath "$0")")
-script_name="$script_home/clipster.py"
-args="-d"
+script_name="$script_home/fdb_query.py"
+# args="-d" # not used anymore since trimming down of clipster.py
+args="" #can be --clipster_debug
 pid_file="/tmp/clipster.pid"
 # echo "pid path: ${pid_file}"
 
@@ -36,7 +37,7 @@ start() {
 stop() {
     # `kill -0 pid` returns successfully if the pid is running, but does not
     # actually kill it.
-    kill -0 $1 && kill -SIGUSR1 $1 # to emit sound on termination
+    kill -0 "$1" && kill -SIGUSR1 "$1" # to emit sound on termination
     rm "$pid_file"
     #echo "stopped"
 }

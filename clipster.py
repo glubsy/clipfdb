@@ -652,52 +652,6 @@ def get_list_from_option_string(string):
     return []
 
 
-def parse_args():
-    """Parse command-line arguments."""
-
-    parser = argparse.ArgumentParser(description='Clipster clipboard manager.')
-    parser.add_argument('-f', '--config', action="store",
-                        help="Path to config directory.")
-    parser.add_argument('-l', '--log_level', action="store", default="INFO",
-                        help="Set log level: DEBUG, INFO (default), WARNING, ERROR, CRITICAL")
-    # Mutually exclusive client and daemon options.
-    boardgrp = parser.add_mutually_exclusive_group()
-    boardgrp.add_argument('-p', '--primary', action="store_const", const='PRIMARY',
-                          help="Query, or write STDIN to, the PRIMARY clipboard.")
-    boardgrp.add_argument('-c', '--clipboard', action="store_const", const='CLIPBOARD',
-                          help="Query, or write STDIN to, the CLIPBOARD clipboard.")
-    boardgrp.add_argument('-d', '--daemon', action="store_true",
-                          help="Launch the daemon.")
-
-    # Mutually exclusive client actions
-    actiongrp = parser.add_mutually_exclusive_group()
-    actiongrp.add_argument('-s', '--select', action="store_true",
-                           help="Launch the clipboard history selection window.")
-    actiongrp.add_argument('-o', '--output', action="store_true",
-                           help="Output selection from history. (See -n and -S).")
-    actiongrp.add_argument('-i', '--ignore', action="store_true",
-                           help="Instruct daemon to ignore next update to clipboard.")
-    actiongrp.add_argument('-r', '--delete', action="store", nargs='?', const='',
-                           help="Delete from clipboard. Deletes matching text, or if no argument given, deletes last item.")
-    actiongrp.add_argument('--erase-entire-board', action="store_true",
-                           help="Delete all items from the clipboard.")
-
-    parser.add_argument('-n', '--number', action="store", type=int, default=1,
-                        help="Number of lines to output: defaults to 1 (See -o). 0 returns entire history.")
-
-    parser.add_argument('-S', '--search', action="store",
-                        help="Pattern to match for output.")
-
-    # --delim must come before -0 to ensure delim is set correctly
-    # otherwise if neither arg is passed, delim=None
-    parser.add_argument('-m', '--delim', action="store", default='\n',
-                        help="String to use as output delimiter (defaults to '\n')")
-    parser.add_argument('-0', '--nul', action="store_const", const='\0', dest='delim',
-                        help="Use NUL character as output delimiter.")
-
-    return parser.parse_args()
-
-
 def parse_config(data_dir, conf_dir):
     """Configuration derived from defaults & file."""
 
@@ -761,14 +715,13 @@ def find_config():
     return "", data_dir
 
 
-def main():
+def main(debug_arg='INFO'):
     """Start the application. Return an exit status (0 or 1)."""
 
     # Find default config and data dirs
     conf_dir, data_dir = find_config()
 
-    debug_arg = "DEBUG"
-    print("DEBUG SET!")
+    # debug_arg is either INFO (default), DEBUG
 
     # Enable logging
     logging.basicConfig(format='%(levelname)s:%(message)s',

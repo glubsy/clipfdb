@@ -87,7 +87,7 @@ class FDBEmbedded():
 
     def init_config(self):
         """parse config and initialize options accordingly"""
-        conf_dir = os.path.dirname(os.path.realpath(__file__))
+        conf_dir = os.path.dirname(os.path.realpath(__file__)) #defaults to script dir
         conf_file = conf_dir + os.sep + "clipfdb.conf" #TODO: make config path configurable (need argv?)
         successsound = conf_dir + os.sep + 'sounds' + os.sep + '340259__kaboose102__blippy-02_short.wav'
         failuresound = conf_dir + os.sep + 'sounds' + os.sep + '340259__kaboose102__blippy-01_short.wav'
@@ -558,9 +558,15 @@ def strip_http_keep_filename_noext(mystring):
 
 if __name__ == "__main__":
     try:
-        clipster_config = clipster.init()
-        daemon = clipster.Daemon(clipster_config)
-        daemon.run()
+        if sys.argv[1] == "--clipster_debug":
+            clipster.main(debug_arg='DEBUG')
+        else:
+            clipster.main()
+
+        ## init daemon with default config path
+        # clipster_config = clipster.init()
+        # daemon = clipster.Daemon(clipster_config)
+        # daemon.run()
 
     except Exception as e:
         print("Exception: " + str(e))
