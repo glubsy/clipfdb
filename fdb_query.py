@@ -47,8 +47,7 @@ class FDBEmbedded():
 
         self.fdb_avail = True
         self.config = self.init_config()
-        self.db_filepaths = self.config.get('clipfdb', 'db_filepaths').split(",")
-        self.setup_environmentvars(self.config.get('clipfdb', 'security2_path'))
+
         self.wants_notifications = self.config.getboolean('clipfdb', 'notifications')
         self.wants_sound_notifications = self.config.getboolean('clipfdb', 'sound_notifications')
         self.wants_terminal_output = self.config.getboolean('clipfdb', "terminal_output")
@@ -68,10 +67,17 @@ class FDBEmbedded():
             if self.config.getboolean('clipfdb', 'use_notify_send'):
                 self.notifyinstance.prefer_notify_send = True
 
-        self.query_ojects = list()
+        self.setup_environmentvars(self.config.get('clipfdb', 'security2_path'))
 
-        for item in self.db_filepaths: #generate as many objects as there are databases to query
-            self.query_ojects.append(FDBQuery(item))
+        self.query_objects = list()
+        for db_section in self.config.sections()[1:]: # exclude clipfdb first section
+            self.query_objects.append(
+                FDBQuery(
+                self.config.get(db_section, 'filepath'),
+                self.config.get(db_section, 'username'),
+                self.config.get(db_section, 'password')
+                )
+            )
 
         if self.wants_sound_notifications:
             self.soundnotifinstance = SoundNotificator()
@@ -87,27 +93,33 @@ class FDBEmbedded():
 
     def init_config(self):
         """parse config and initialize options accordingly"""
-        conf_dir = os.path.dirname(os.path.realpath(__file__)) #defaults to script dir
-        conf_file = conf_dir + os.sep + "clipfdb.conf" #TODO: make config path configurable (need argv?)
-        successsound = conf_dir + os.sep + 'sounds' + os.sep + '340259__kaboose102__blippy-02_short.wav'
-        failuresound = conf_dir + os.sep + 'sounds' + os.sep + '340259__kaboose102__blippy-01_short.wav'
-        startupsound = conf_dir + os.sep + 'sounds' + os.sep + '146718__fins__button_lower.wav'
-        shutdownsound = conf_dir + os.sep + 'sounds' + os.sep + '321103__nsstudios__blip1.wav'
-        config_defaults = {"db_filepaths": "", # list of paths to databses files
-                           "security2_path": "", # absolute path to security2.fdb
-                           "notifications": "yes",
-                           "use_notify_send": "no", # prefer using notify-send instead of notify2
-                           "sound_notifications": "yes",
-                           "use_paplay": "no", # prefer using paplay instead of simpleaudio
-                           "terminal_output": "no", # output query results to stdout
-                           "success_sound": successsound, # absolute path to success sound file
-                           "failure_sound": failuresound, # absolute path to failure sound file
-                           "startup_sound": startupsound, # absolute path to startup sound file
-                           "shutdown_sound": shutdownsound # absolute path to shutdown sound file
+        conf_dir, data_dir = find_config()
+        #HACK:
+        data_dir = os.path.dirname(__file__)
+
+        successsound = data_dir + os.sep + 'sounds' + os.sep + '340259__kaboose102__blippy-02_short.wav'
+        failuresound = data_dir + os.sep + 'sounds' + os.sep + '340259__kaboose102__blippy-01_short.wav'
+        startupsound = data_dir + os.sep + 'sounds' + os.sep + '146718__fins__button_lower.wav'
+        shutdownsound = data_dir + os.sep + 'sounds' + os.sep + '321103__nsstudios__blip1.wav'
+
+        config_defaults = {"data_dir": data_dir,  # clipfdb 'root' dir
+                            "conf_dir": conf_dir,  # clipfdb config dir
+                            "db_filepaths": "", # list of paths to databses files
+                            "security2_path": "", # absolute path to security2.fdb
+                            "notifications": "yes",
+                            "use_notify_send": "no", # prefer using notify-send instead of notify2
+                            "sound_notifications": "yes",
+                            "use_paplay": "no", # prefer using paplay instead of simpleaudio
+                            "terminal_output": "no", # output query results to stdout
+                            "success_sound": successsound, # absolute path to success sound file
+                            "failure_sound": failuresound, # absolute path to failure sound file
+                            "startup_sound": startupsound, # absolute path to startup sound file
+                            "shutdown_sound": shutdownsound # absolute path to shutdown sound file
                           }
 
         config = configparser.SafeConfigParser(config_defaults)
         config.add_section('clipfdb')
+        conf_file = conf_dir + os.sep + "clipfdb.conf"
         result = config.read(conf_file)
         if not result:
             print("Error trying to load the config file!")
@@ -124,13 +136,13 @@ class FDBEmbedded():
 
 
     def setup_environmentvars(self, path):
-        """Sets up the FIREBIRD env var for securty2.fdb lookup"""
+        """Sets up the FIREBIRD env var for securty2.fdb lookup"""  
         # Point to our current VVV firebird database (for security2.fdb)
         # os.environ['FIREBIRD'] = '~/INSTALLED/VVV-1.3.0-x86_64/firebird'
         # Alternatively, use a copy of the security2.fdb in that path:
+        #FIXME can we have separate security2.fdb files for each database?
         os.environ['FIREBIRD'] = path
         setlocale(LC_ALL, "") #TODO: add to config options for sorting?
-
         return True
 
 
@@ -140,19 +152,19 @@ class FDBEmbedded():
         if not self.fdb_avail:
             return
 
-        for queryobj in self.query_ojects:
+        for queryobj in self.query_objects:
             queryobj.activate()
 
         parsed_content = self.parse_clipboard_content(board_content)
 
 
-        for queryobj in self.query_ojects:
+        for queryobj in self.query_objects:
             if not queryobj.is_disabled:
                 queryobj.response_dict['original_query'] = parsed_content
                 self.get_set_from_result(queryobj)
 
         # notifications:
-        for queryobj in self.query_ojects:
+        for queryobj in self.query_objects:
             if queryobj.is_active and not queryobj.is_disabled:
                 if self.wants_notifications:
                     self.notifyinstance.init_send_notification(queryobj)
@@ -168,14 +180,14 @@ class FDBEmbedded():
         board_content = board_content.split("\n")[0] # we stop at the first newline found
         length = len(board_content)
         if length < 4: #arbitrary 3 character long?
-            for queryobj in self.query_ojects:
+            for queryobj in self.query_objects:
                 queryobj.is_disabled = True #query is too short
             return
         else:
             result = board_content
             reresult = self.repattern_tumblr_redirect.search(board_content)
             if reresult: #matches t.umblr redirects
-            #if "t.umblr.com/redirect" in board_content: 
+            #if "t.umblr.com/redirect" in board_content:
                 #result = parse.unquote(result.split("?z=")[1].split("&t=")[0])
                 result = parse.unquote(reresult.group(1))
 
@@ -209,7 +221,7 @@ class FDBEmbedded():
             result = result.split("/")[-1].split(".")[0]
 
             if result == '' or len(result) < 4: #don't process if less than 4 chars
-                for queryobj in self.query_ojects:
+                for queryobj in self.query_objects:
                     queryobj.is_disabled = True
                 return
 
@@ -229,8 +241,10 @@ class FDBEmbedded():
         con = fdb.connect(
             database=queryobj.db_filepath,
             # dsn='localhost:~/test/CGI.vvv', #localhost:3050
-            user='sysdba', password='masterkey'
+            user=queryobj.username, password=queryobj.password,
             #charset='UTF8' # specify a character set for the connection
+            # workaround for libfbclient not getting along with firebird server, need uninstalled
+            fb_library_name="/usr/lib/python3.6/site-packages/fdb_embedded/lib/libfbclient.so" #HACK HACK
         )
 
         # Create a Cursor object that operates in the context of Connection con:
@@ -328,13 +342,15 @@ class FDBEmbedded():
 
 
 class FDBQuery():
-    """a query object"""
+    """Object holding payloads to send to database"""
 
-    def __init__(self, databasepath):
+    def __init__(self, databasepath, username, password):
         self.is_active = False
         self.is_disabled = True
         self.db_filepath = databasepath
         self.db_filename = databasepath.split("/")[-1]
+        self.username = username
+        self.password = password
         self.response_dict = {'found_words': '', 'count': int(), 'original_query': ''}
 
     def activate(self):
@@ -497,8 +513,25 @@ class SoundNotificator():
             return 1
         return 1
 
-
 # UTILS
+def find_config():
+    """Attempt to find config from xdg basedir-spec paths/environment variables."""
+
+    # Set a default directory for clipfdb files
+    # https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+    xdg_config_dirs = os.environ.get('XDG_CONFIG_DIRS', '/etc/xdg').split(':')
+    xdg_config_dirs.insert(0, os.environ.get('XDG_CONFIG_HOME', os.path.join(os.environ.get('HOME'), ".config")))
+    xdg_data_home = os.environ.get('XDG_DATA_HOME', os.path.join(os.environ.get('HOME'), ".local/share"))
+
+    data_dir = os.path.join(xdg_data_home, "clipfdb")
+    # Keep trying to define conf_dir, moving from local -> global
+    for path in xdg_config_dirs:
+        conf_dir = os.path.join(path, 'clipfdb')
+        if os.path.exists(conf_dir):
+            return conf_dir, data_dir
+    return "", data_dir
+
+
 def bytes_2_human_readable(number_of_bytes):
     """Converts bytes into KB/MB/GB/TB depending on value"""
     if number_of_bytes < 0:
@@ -557,16 +590,13 @@ def strip_http_keep_filename_noext(mystring):
 
 
 if __name__ == "__main__":
-    try:
-        if sys.argv[1] == "--clipster_debug":
-            clipster.main(debug_arg='DEBUG')
-        else:
-            clipster.main()
 
-        ## init daemon with default config path
-        # clipster_config = clipster.init()
-        # daemon = clipster.Daemon(clipster_config)
-        # daemon.run()
+    if sys.argv[1].find("--clipster_debug") != -1:
+        clipster.main(debug_arg='DEBUG')
+    else:
+        clipster.main()
 
-    except Exception as e:
-        print("Exception: " + str(e))
+    ## init daemon with default config path
+    # clipster_config = clipster.init()
+    # daemon = clipster.Daemon(clipster_config)
+    # daemon.run()

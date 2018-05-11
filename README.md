@@ -25,6 +25,8 @@ Note: config file is the same one as clipster (for now) in ~/.config/clipster/cl
 
 # TIPS
 
+Create config directory in ~/.config/clipfdb and copy clipfdb.conf
+
 Configure dunst for colored output depending on results.
 Example below, disables icon, makes body bold and green / red on found / nothing found
 
