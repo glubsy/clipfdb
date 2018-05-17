@@ -8,7 +8,7 @@ script_home=$(dirname "$(realpath "$0")")
 script_name="$script_home/fdb_query.py"
 # args="-d" # not used anymore since trimming down of clipster.py
 args="" #can be --clipster_debug
-pid_file="/tmp/clipster.pid"
+pid_file="/tmp/clipfdb.pid"
 # echo "pid path: ${pid_file}"
 
 # returns a boolean and optionally the pid
