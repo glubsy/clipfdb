@@ -244,7 +244,7 @@ class FDBEmbedded():
             user=queryobj.username, password=queryobj.password,
             #charset='UTF8' # specify a character set for the connection
             # workaround for libfbclient not getting along with firebird server, need uninstalled
-            fb_library_name="/usr/lib/python3.6/site-packages/fdb_embedded/lib/libfbclient.so" #HACK HACK
+            fb_library_name="/usr/lib/python3.7/site-packages/fdb_embedded/lib/libfbclient.so" #HACK HACK
         )
 
         # Create a Cursor object that operates in the context of Connection con:
@@ -591,7 +591,7 @@ def strip_http_keep_filename_noext(mystring):
 
 if __name__ == "__main__":
 
-    if sys.argv[1].find("--clipster_debug") != -1:
+    if "--clipster_debug" in sys.argv:
         clipster.main(debug_arg='DEBUG')
     else:
         clipster.main()
