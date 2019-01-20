@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/bin/env python
 import os
 import sys
 import re
@@ -16,13 +16,14 @@ from urllib import parse
 
 from constants import BColors
 try:
-    import fdb_embedded as fdb
-    # from fdb_embedded import services
+    import fdb
+    # import fdb_embedded as fdb
     FDB_AVAILABLE = True
     try:
         import notify2
         NOTIFY2_AVAIL = True
-    except ImportError:
+    except ImportError as e:
+        print(f"Error importing notify2: {e}")
         NOTIFY2_AVAIL = False
 
     try:
@@ -30,7 +31,8 @@ try:
         SA_AVAIL = True
     except ImportError:
         SA_AVAIL = False
-except ImportError:
+except ImportError as e:
+    print(f"Error importing fdb: {e}")
     FDB_AVAILABLE = False
 
 
@@ -242,9 +244,11 @@ class FDBEmbedded():
             database=queryobj.db_filepath,
             # dsn='localhost:~/test/CGI.vvv', #localhost:3050
             user=queryobj.username, password=queryobj.password,
-            #charset='UTF8' # specify a character set for the connection
-            # workaround for libfbclient not getting along with firebird server, need uninstalled
-            fb_library_name="/usr/lib/python3.7/site-packages/fdb_embedded/lib/libfbclient.so" #HACK HACK
+            # charset='UTF8' # specify a character set for the connection
+            # workaround if libfbclient is not getting along with firebird server, need uninstalled
+            # fb_library_name="/usr/lib/python3.7/site-packages/fdb_embedded/lib/libfbclient.so" #HACK HACK
+            # Or in case we still can't find it somehow (with fdb pypi package)
+            # fb_library_name="/usr/lib/libfbclient.so" #HACK HACK
         )
 
         # Create a Cursor object that operates in the context of Connection con:
@@ -385,7 +389,6 @@ class Notifier2():
 
     def notify2_notify(self, obj):
         """sends dictionary['found_words'] to notification server"""
-
         found_words = ""
         for item, size in obj.response_dict['found_words']:
             found_words += item + " " + bytes_2_human_readable(size) + "\n"

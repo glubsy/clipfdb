@@ -5,27 +5,31 @@ for matches in CLIPBOAD clipboad (Linux only).
 
 1. Create one or more Firebird databases with [VVV (Virtual Volume View)](http://vvvapp.sourceforge.net)
 
-2. Point to the directory holding security2.fdb, and your databases (two separate config items)
+2. Point to the directory holding security2.fdb, and your databases (two separate config items) in the config file which should be placed in `~/.config/clipfdb`
 
-3. start start_daemon.sh, preferably with a key binding (in i3: exec --no-startup-id "/path/to/start_daemon.sh") to toggle on/off
+3. Install dependencies: in a venv: `pip install virtualenv && virtualenv -p python3 --system-site-packages venv && source venv/bin/activate` and `pip install -r requirements.txt`
+
+4. start `start_daemon.sh`, preferably with a key binding (in i3: exec --no-startup-id "/path/to/start_daemon.sh") to toggle on/off. Can be started with argument "venv" to automatically find and activate a python virtualenv.
 
 Files which have been found in the databases will be either printed to terminal (if started from one and config option is active)
 or/and simply display as a notification through your notification server (dunst, xfce4-notifyd, etc.) with optional sound effect.
 
-Note: config file is the same one as clipster (for now) in ~/.config/clipster/clipster.ini
+Note: the configuration for the clipboard monitoring part is still located in `~/.config/clipfdb/clipster.ini` for now
 
 # Dependencies
 
-* [fdb_embedded](https://github.com/andrewleech/fdb_embedded) (mandatory) (git clone https://github.com/andrewleech/fdb_embedded.git)
+These should be installed automatically with `pip install -r -requirements.txt`:
 
-* [notify2](https://pypi.python.org/pypi/notify2) (optional) or notify-send. A notifcation daemon (ie. dunst). (pip install notify2)
+* The firebird python driver [fdb](https://pypi.org/project/fdb/) or [fdb_embedded](https://github.com/andrewleech/fdb_embedded). Install with either `pip install fdb` for the former or `git clone https://github.com/andrewleech/fdb_embedded.git` for the latter.
 
-* [simpleaudio](https://pypi.python.org/pypi/simpleaudio/) to play sounds (optional) or paplay (pip install simpleaudio)
+* [notify2](https://pypi.python.org/pypi/notify2) (optional) or notify-send and a notifcation daemon (ie. dunst): `pip install notify2`. Warning: requires dbus python bindings, `pacman -S python-dbus` in Arch Linux.
+
+* [simpleaudio](https://pypi.python.org/pypi/simpleaudio/) to play sounds (optional) or paplay `pip install simpleaudio`.
 
 
 # TIPS
 
-Create config directory in ~/.config/clipfdb and copy clipfdb.conf
+Create config directory ~/.config/clipfdb/ and copy clipfdb.conf.
 
 Configure dunst for colored output depending on results.
 Example below, disables icon, makes body bold and green / red on found / nothing found
@@ -49,10 +53,10 @@ Example below, disables icon, makes body bold and green / red on found / nothing
 
 # TODOs
 
-* Wipe out most of Clipster methods we don't need (branch clipster_clean)
+* Write requirements.txt to ease (partially automate) installation process 
 
 * Better error handling (ie. invalid options)
 
-* make our own firebird sql database
+* Make firebird sql databases ourselves?
 
-* make fdb_embedded an optional dependency by using a true Firebird server
+* Make fdb_embedded an optional dependency when using a true Firebird server

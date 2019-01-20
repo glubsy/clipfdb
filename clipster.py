@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/bin/env python
 
 """Clipster - Clipboard manager."""
 
@@ -706,10 +706,10 @@ def find_config():
     xdg_config_dirs.insert(0, os.environ.get('XDG_CONFIG_HOME', os.path.join(os.environ.get('HOME'), ".config")))
     xdg_data_home = os.environ.get('XDG_DATA_HOME', os.path.join(os.environ.get('HOME'), ".local/share"))
 
-    data_dir = os.path.join(xdg_data_home, "clipster")
+    data_dir = os.path.join(xdg_data_home, "clipfdb")
     # Keep trying to define conf_dir, moving from local -> global
     for path in xdg_config_dirs:
-        conf_dir = os.path.join(path, 'clipster')
+        conf_dir = os.path.join(path, 'clipfdb')
         if os.path.exists(conf_dir):
             return conf_dir, data_dir
     return "", data_dir
