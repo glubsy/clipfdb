@@ -179,7 +179,7 @@ class FDBEmbedded():
         """isolate filename from URIs, extensions and whatnot,
         returns dic{'validwords', 'count', 'original_string'} """
 
-        board_content = board_content.split("\n")[0] # we stop at the first newline found
+        board_content = board_content.split("\n")[0] # we stop at the first newline found²
         length = len(board_content)
         if length < 4: #arbitrary 3 character long?
             for queryobj in self.query_objects:
@@ -213,7 +213,7 @@ class FDBEmbedded():
             # except Exception as e:
             #     print(e)
 
-            if result.find("http://") or result.find("https://"):
+            if result.find("http://") != int(-1) or result.find("https://") != int(-1):
                 result = result.split("/")[-1]
                 if result.find("?"): #FIXME: more params possible here, only one hardcoded case!
                     result = result.split("?image=")[-1]
@@ -587,7 +587,7 @@ def isolate_filename(url):
 
 def strip_http_keep_filename_noext(mystring):
     """if contains http(s), splits url and keeps last item without extension"""
-    if mystring.find("http://") or mystring.find("https://"):
+    if mystring.find("http://") != int(-1) or mystring.find("https://") != int(-1):
         return mystring.split("/")[-1].split(".")[0]
     return mystring
 

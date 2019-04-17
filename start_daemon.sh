@@ -59,8 +59,6 @@ stop() {
     # echo "stopped"
 }
 
-echo "$(date) $0 called with \"$*\"" > ~/test.log
-
 read runningvar pid < <(running)
 
 if [[ "${runningvar}" == "true" ]]; then
