@@ -53,6 +53,8 @@ class FDBEmbedded():
         self.wants_notifications = self.config.getboolean('clipfdb', 'notifications')
         self.wants_sound_notifications = self.config.getboolean('clipfdb', 'sound_notifications')
         self.wants_terminal_output = self.config.getboolean('clipfdb', "terminal_output")
+        self.wants_parent_directories = self.config.getboolean('clipfdb', "parent_directories")
+        self.max_results = self.config.getint('clipfdb', "max_results")
 
         if not self.wants_terminal_output and not self.wants_sound_notifications and not self.wants_notifications:
             self.fdb_avail = False
@@ -108,6 +110,8 @@ class FDBEmbedded():
                             "conf_dir": conf_dir,  # clipfdb config dir
                             "db_filepaths": "", # list of paths to databses files
                             "security2_path": "", # absolute path to security2.fdb
+                            "parent_directories": "yes", # retrieve parent directories of files too
+                            "max_results": 20, # maximum number of results to report
                             "notifications": "yes",
                             "use_notify_send": "no", # prefer using notify-send instead of notify2
                             "sound_notifications": "yes",
@@ -232,10 +236,11 @@ class FDBEmbedded():
 
     def get_set_from_result(self, queryobj):
         """Search our FDB for word
-        returns set(found_list), int(found_count)"""
+        returns set(result_list), int(found_count)"""
 
         # print("DEBUG get_set_from_result(): looking for: |" + queryobj.response_dict['original_query'] + "|")
-        found_list = list()
+        result_list = list()
+        result_dirs = set()
         found_count = 0
         # con1 = services.connect(user='sysdba', password='masterkey')
         # print("Security file for database is: ", con1.get_security_database_path() + "\n")
@@ -262,26 +267,39 @@ class FDBEmbedded():
             querystring = queryobj.response_dict['original_query'].upper()
 
         # adding UPPER for case insensitive search
-        select_stmt = "select FILE_NAME, FILE_SIZE from FILES WHERE UPPER (FILE_NAME) LIKE '%" \
+        select_stmt = "select FILE_NAME, FILE_SIZE, PATH_ID from FILES WHERE UPPER (FILE_NAME) LIKE '%" \
         + querystring + "%'"
 
         try:
             cur.execute(select_stmt)
 
             for row in cur:
-                # print(BColors.OKGREEN + "DEBUG FDB found: " + row[0] + " " + str(row[1]) + BColors.ENDC)
-                found_list.append((row[0], row[1]))
+                # print(f'{BColors.OKGREEN}DEBUG FDB found row: {row[0]} {str(row[1])} {row[2]}{BColors.ENDC}')
+                result_list.append([row[0], row[1], row[2]])
+                result_dirs.add(row[2])
                 found_count += 1
-                if found_count > 20: #maximum results returned
+                if found_count > self.max_results: #maximum results returned
                     break
 
-            # found_list.sort(key=itemgetter(0, 1)) #sort alphabetically, then by size, but ignore case
-            found_list.sort(key=self.locale_keyfunc(itemgetter(0))) #sort alphabetically, CI
+            # result_list.sort(key=itemgetter(0, 1)) #sort alphabetically, then by size, but ignore case
+            result_list.sort(key=self.locale_keyfunc(itemgetter(0))) #sort alphabetically, CI
             # print(BColors.OKGREEN + "DEBUG found_count: " + str(found_count) + BColors.ENDC)
-            # print(BColors.OKGREEN + "DEBUG found_list: " + str(found_list) + BColors.ENDC)
+            # print(BColors.OKGREEN + "DEBUG result_list: " + str(result_list) + BColors.ENDC)
+
+            # Retrieve parent directory from DB
+            if self.wants_parent_directories:
+                directory_dict = {}
+                # assign pathnames corresponding to each path_id
+                for path_id in result_dirs:
+                    directory_dict[path_id] = self.strip_to_basepath(self.get_directory_value_from_db(con, path_id))
+
+                # replace path_id in our result with pathname
+                for item in result_list:
+                    if directory_dict.get(item[2]) is not None:
+                        item[2] = directory_dict.get(item[2])
             con.close()
             queryobj.response_dict['found_words'], queryobj.response_dict['count'] \
-            = found_list, found_count
+            = result_list, found_count
 
         except Exception as identifier:
             errormesg = "Error while looking up: " + queryobj.response_dict['original_query'] \
@@ -293,6 +311,32 @@ class FDBEmbedded():
             self.print_to_stdout(queryobj)
 
 
+    def strip_to_basepath(self, path):
+        """Strip down full pathname to parent directories only"""
+        if path is None:
+            # might happen if not found?
+            return ""
+        _list = path.split("/")
+
+        if 1 < len(_list) and len(_list[1:]) > 0:
+            # not a single directory, but we can omit the root dir safely
+            return "/".join(_list[1:])
+        elif len(_list) == 1:
+            return _list[0]
+        else:
+            return "/".join(_list) # unnecessary?
+
+
+    def get_directory_value_from_db(self, con, dir_id):
+        """ retrieve the full path corresponding to PATH_ID from VVV's procedure"""
+        cur = con.cursor()
+        try:
+            cur.execute("EXECUTE PROCEDURE SP_GET_FULL_PATH( ?, ? )",(dir_id, "/"))
+        except Exception as e:
+            print(f"Error in SP_GET_FULL_PATH: {e}")
+        return cur.fetchone()[0]
+
+
     def locale_keyfunc(self, keyfunc):
         """use Locale for sorting"""
         def locale_wrapper(obj):
@@ -302,18 +346,17 @@ class FDBEmbedded():
 
     def print_to_stdout(self, queryobj):
         """do pretty text output"""
-        found_list = ""
+        result_list = ""
         if queryobj.response_dict['count'] > 0:
-            for item, size in queryobj.response_dict['found_words']:
-                found_list += item + "\t" + bytes_2_human_readable(size) + "\n"
+            for item, size, pardir in queryobj.response_dict['found_words']:
+                result_list += "".join([item,"\t",bytes_2_human_readable(size),"\t",str(pardir),"\n"])
                 color = BColors.OKGREEN
         else:
             color = BColors.FAIL
-        print("Found " + color + str(queryobj.response_dict['count']) + BColors.ENDC + \
-              " for \'" + BColors.BOLD \
-              + queryobj.response_dict['original_query'] + "\'" + BColors.ENDC \
-              + " in " + BColors.BOLD + queryobj.db_filename + BColors.ENDC + "\n" \
-              + color + found_list + BColors.ENDC)
+        print(f"Found {color}{str(queryobj.response_dict['count'])}{BColors.ENDC} \
+for \"{BColors.BOLD}{queryobj.response_dict['original_query']}\"{BColors.ENDC} \
+in {BColors.BOLD}{queryobj.db_filename}{BColors.ENDC}\n\
+{color}{result_list}{BColors.ENDC}")
 
 # if __name__ == "__main__":
 #     OBJ = FDBquery()
@@ -390,11 +433,13 @@ class Notifier2():
     def notify2_notify(self, obj):
         """sends dictionary['found_words'] to notification server"""
         found_words = ""
-        for item, size in obj.response_dict['found_words']:
-            found_words += item + " " + bytes_2_human_readable(size) + "\n"
+        for item, size, pardir in obj.response_dict['found_words']:
+            found_words += "".join([item," ",bytes_2_human_readable(size)," ",str(pardir),"\n"])
         count = obj.response_dict['count']
-        summary = "Found: " + str(count) + " for " + \
-        obj.response_dict['original_query'] + " in " + obj.db_filename
+
+        summary = "".join(("Found: ",str(count)," for ",\
+        obj.response_dict['original_query']," in ",obj.db_filename))
+
         notif = notify2.Notification(summary,
                                      found_words
                                      # "dialog-information" # Icon name in /usr/share/icons/
@@ -422,10 +467,10 @@ class Notifier2():
             category = 'clipfdb_notfound'
 
         found_words = ""
-        summary = "For " + obj.response_dict['original_query'] + " in " + obj.db_filename
+        summary = "".join(("For ",obj.response_dict['original_query']," in ",obj.db_filename))
 
-        for item, size in obj.response_dict['found_words']:
-            found_words += item + " " + bytes_2_human_readable(size) + "\n"
+        for item, size, pardir in obj.response_dict['found_words']:
+            found_words += "".join([item," ",bytes_2_human_readable(size)," ",str(pardir),"\n"])
 
         try:
             # cmd = ['notify-send', '-c', category, '-i', 'dialog-information', summary, found_words]
