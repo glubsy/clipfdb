@@ -1,5 +1,5 @@
 Fork of [Clipster](https://github.com/mrichar1/clipster), with added classes to automatically search a local database
-for matches in CLIPBOAD clipboad (Linux only).
+for matches in CLIPBOARD clipboard (Linux only).
 
 # How to use
 
@@ -52,6 +52,8 @@ Example below, disables icon, makes body bold and green / red on found / nothing
 
 
 # TODOs
+
+* Remove clipster code and only keep the very basic for hooking the clipboard
 
 * Write requirements.txt to ease (partially automate) installation process 
 

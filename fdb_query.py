@@ -64,6 +64,7 @@ class FDBEmbedded():
         self.repattern_tumblr = re.compile(r'(tumblr_.*o)[1-9]+_.*\..*', re.I) #eg (tumblr_abcdeo)10_raw.jpg
         self.repattern_tumblr_inline = re.compile(r'(tumblr_inline_.*)_.{3,4}.*', re.I) #eg (tumblr_inline_abcdeo)_540.jpg
         self.repattern_tumblr_redirect = re.compile(r't\.umblr\.com\/redirect\?z=(.*)&t=.*', re.I)
+        self.repattern_extensions = re.compile(r'^(.*)(?:\.(?:mp4|webm|avi|mov|mkv|zip|rar|7z|gif|jpeg|jpg|png))$', re.I)
 
         # initialize objects instances
         if self.wants_notifications:
@@ -183,7 +184,7 @@ class FDBEmbedded():
         """isolate filename from URIs, extensions and whatnot,
         returns dic{'validwords', 'count', 'original_string'} """
 
-        board_content = board_content.split("\n")[0] # we stop at the first newline found²
+        board_content = board_content.split("\n")[0] # we stop at the first newline found
         length = len(board_content)
         if length < 4: #arbitrary 3 character long?
             for queryobj in self.query_objects:
@@ -224,9 +225,15 @@ class FDBEmbedded():
 
                 result = parse.unquote_plus(result)
 
-            result = result.split("/")[-1].split(".")[0]
+            # Dirty way or removing trailing slash if there's one
+            result = result.split("/")[-1]
 
-            if result == '' or len(result) < 4: #don't process if less than 4 chars
+            # Remove known extensions
+            ext = self.repattern_extensions.search(result)
+            if ext:
+                result = parse.unquote(ext.group(1))
+
+            if result == '' or len(result) < 4: # Don't process if less than 4 chars
                 for queryobj in self.query_objects:
                     queryobj.is_disabled = True
                 return
