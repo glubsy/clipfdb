@@ -401,7 +401,8 @@ class Daemon(object):
         if text:
             logging.debug("Selection is text.")
             if selection == "CLIPBOARD":
-                self.fdbquery.query_databases(text)
+                if len(text) < 100: # avoid parsing too long data in firebird
+                    self.fdbquery.query_databases(text)
 
             self.update_history(selection, text)
             # If no text received, either the selection was an empty string,

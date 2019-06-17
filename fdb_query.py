@@ -185,8 +185,7 @@ class FDBEmbedded():
         returns dic{'validwords', 'count', 'original_string'} """
 
         board_content = board_content.split("\n")[0] # we stop at the first newline found
-        length = len(board_content)
-        if length < 4: #arbitrary 3 character long?
+        if len(board_content) < 4: # skip if under 4 characters
             for queryobj in self.query_objects:
                 queryobj.is_disabled = True #query is too short
             return
