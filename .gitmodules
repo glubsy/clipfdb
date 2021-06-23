@@ -1,0 +1,3 @@
+[submodule "fdb_embedded"]
+	path = fdb_embedded
+	url = https://github.com/andrewleech/fdb_embedded

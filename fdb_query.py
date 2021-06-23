@@ -9,45 +9,47 @@ import subprocess
 from operator import itemgetter
 from locale import setlocale, strxfrm, LC_ALL
 import configparser
-import signal
+# import signal
 import clipster
 # from ast import literal_eval
 from urllib import parse
 
 from constants import BColors
+
 try:
     import fdb
     # import fdb_embedded as fdb
-    FDB_AVAILABLE = True
-    try:
-        import notify2
-        NOTIFY2_AVAIL = True
-    except ImportError as e:
-        print(f"Error importing notify2: {e}")
-        NOTIFY2_AVAIL = False
-
-    try:
-        import simpleaudio
-        SA_AVAIL = True
-    except ImportError:
-        SA_AVAIL = False
 except ImportError as e:
     print(f"Error importing fdb: {e}")
-    FDB_AVAILABLE = False
+    print(BColors.FAIL + "Warning: fdb_embedded couldn't be imported,\n" + \
+            "We won't be able to check the Firebird database with our embedded client.\n" \
+            + "Make sure you've installed the fdb_embedded package correctly." + BColors.ENDC)
+    raise
+
+try:
+    import notify2
+    NOTIFY2_AVAIL = True
+except ImportError as e:
+    print(f"Error importing notify2: {e}")
+    NOTIFY2_AVAIL = False
+
+try:
+    import simpleaudio
+    SA_AVAIL = True
+except ImportError:
+    SA_AVAIL = False
+
+# repattern_tumblr_full = re.compile(r'(tumblr_.*_).*\..*') #eg (tumblr_abcdeo1_)raw.jpg
+repattern_tumblr = re.compile(r'(tumblr_.*o)[1-9]+_.*\..*', re.I) #eg (tumblr_abcdeo)10_raw.jpg
+repattern_tumblr_inline = re.compile(r'(tumblr_inline_.*)_.{3,4}.*', re.I) #eg (tumblr_inline_abcdeo)_540.jpg
+repattern_tumblr_redirect = re.compile(r't\.umblr\.com\/redirect\?z=(.*)&t=.*', re.I)
+repattern_extensions = re.compile(r'^(.*)(?:\.(?:mp4|webm|avi|mov|mkv|zip|rar|7z|gif|jpeg|jpg|png))$', re.I)
 
 
 class FDBEmbedded():
     """Handles querying VVV firebird databases locally"""
 
     def __init__(self):
-        if not FDB_AVAILABLE:
-            print(BColors.FAIL + "Warning: fdb_embedded couldn't be imported,\n" + \
-            "We won't be able to check the Firebird database with our embedded client.\n" \
-            + "Make sure you've installed the fdb_embedded package correctly." + BColors.ENDC)
-            self.fdb_avail = False
-            return
-
-        self.fdb_avail = True
         self.config = self.init_config()
 
         self.wants_notifications = self.config.getboolean('clipfdb', 'notifications')
@@ -56,15 +58,10 @@ class FDBEmbedded():
         self.wants_parent_directories = self.config.getboolean('clipfdb', "parent_directories")
         self.max_results = self.config.getint('clipfdb', "max_results")
 
-        if not self.wants_terminal_output and not self.wants_sound_notifications and not self.wants_notifications:
-            self.fdb_avail = False
-            return # no use using us!
-
-        # self.repattern_tumblr_full = re.compile(r'(tumblr_.*_).*\..*') #eg (tumblr_abcdeo1_)raw.jpg
-        self.repattern_tumblr = re.compile(r'(tumblr_.*o)[1-9]+_.*\..*', re.I) #eg (tumblr_abcdeo)10_raw.jpg
-        self.repattern_tumblr_inline = re.compile(r'(tumblr_inline_.*)_.{3,4}.*', re.I) #eg (tumblr_inline_abcdeo)_540.jpg
-        self.repattern_tumblr_redirect = re.compile(r't\.umblr\.com\/redirect\?z=(.*)&t=.*', re.I)
-        self.repattern_extensions = re.compile(r'^(.*)(?:\.(?:mp4|webm|avi|mov|mkv|zip|rar|7z|gif|jpeg|jpg|png))$', re.I)
+        if not self.wants_terminal_output \
+        and not self.wants_sound_notifications \
+        and not self.wants_notifications:\
+            return
 
         # initialize objects instances
         if self.wants_notifications:
@@ -132,15 +129,13 @@ class FDBEmbedded():
             print("Error trying to load the config file!")
         return config
 
-
     def signal_handler(self): # Called from Clipster
-        """Handles SIGINT signal, blocks it to terminate gracefully
+        """Handle SIGUSR1 signal to terminate gracefully
         after the current download has finished"""
         # print("Terminating script!")
         if self.wants_sound_notifications:
             self.soundnotifinstance.init_startup_sound("shutdown")
         sys.exit(0)
-
 
     def setup_environmentvars(self, path):
         """Sets up the FIREBIRD env var for securty2.fdb lookup"""  
@@ -150,14 +145,9 @@ class FDBEmbedded():
         #FIXME can we have separate security2.fdb files for each database?
         os.environ['FIREBIRD'] = path
         setlocale(LC_ALL, "") #TODO: add to config options for sorting?
-        return True
-
 
     def query_databases(self, board_content):
         """Starts the query process to FDB databases"""
-
-        if not self.fdb_avail:
-            return
 
         for queryobj in self.query_objects:
             queryobj.activate()
@@ -178,8 +168,6 @@ class FDBEmbedded():
                 if self.wants_sound_notifications:
                     self.soundnotifinstance.init_send_sound(queryobj)
 
-
-
     def parse_clipboard_content(self, board_content):
         """isolate filename from URIs, extensions and whatnot,
         returns dic{'validwords', 'count', 'original_string'} """
@@ -191,18 +179,18 @@ class FDBEmbedded():
             return
         else:
             result = board_content
-            reresult = self.repattern_tumblr_redirect.search(board_content)
+            reresult = repattern_tumblr_redirect.search(board_content)
             if reresult: #matches t.umblr redirects
             #if "t.umblr.com/redirect" in board_content:
                 #result = parse.unquote(result.split("?z=")[1].split("&t=")[0])
                 result = parse.unquote(reresult.group(1))
 
             if "tumblr" in result:
-                reresult = self.repattern_tumblr.search(board_content)
+                reresult = repattern_tumblr.search(board_content)
                 if reresult: # matches regular tumblr url
                     result = reresult.group(1)
                 else:
-                    reresult = self.repattern_tumblr_inline.search(board_content)
+                    reresult = repattern_tumblr_inline.search(board_content)
                     if reresult: # matches inline url
                         result = reresult.group(1)
 
@@ -228,7 +216,7 @@ class FDBEmbedded():
             result = result.split("/")[-1]
 
             # Remove known extensions
-            ext = self.repattern_extensions.search(result)
+            ext = repattern_extensions.search(result)
             if ext:
                 result = parse.unquote(ext.group(1))
 
@@ -236,9 +224,7 @@ class FDBEmbedded():
                 for queryobj in self.query_objects:
                     queryobj.is_disabled = True
                 return
-
             return result
-
 
     def get_set_from_result(self, queryobj):
         """Search our FDB for word
@@ -316,7 +302,6 @@ class FDBEmbedded():
         if self.wants_terminal_output:
             self.print_to_stdout(queryobj)
 
-
     def strip_to_basepath(self, path):
         """Strip down full pathname to parent directories only"""
         if path is None:
@@ -332,7 +317,6 @@ class FDBEmbedded():
         else:
             return "/".join(_list) # unnecessary?
 
-
     def get_directory_value_from_db(self, con, dir_id):
         """ retrieve the full path corresponding to PATH_ID from VVV's procedure"""
         cur = con.cursor()
@@ -342,13 +326,11 @@ class FDBEmbedded():
             print(f"Error in SP_GET_FULL_PATH: {e}")
         return cur.fetchone()[0]
 
-
     def locale_keyfunc(self, keyfunc):
         """use Locale for sorting"""
         def locale_wrapper(obj):
             return strxfrm(keyfunc(obj))
         return locale_wrapper
-
 
     def print_to_stdout(self, queryobj):
         """do pretty text output"""
@@ -492,7 +474,6 @@ class Notifier2():
             print("Exception notifier_send_wrapper(): " + str(e))
             return 1
         return 1
-
 
 
 class SoundNotificator():

@@ -6,7 +6,7 @@
 
 from __future__ import print_function
 import signal
-import argparse
+# import argparse
 import json
 import socket
 import os
@@ -16,9 +16,7 @@ import logging
 import tempfile
 import re
 import stat
-from contextlib import closing
 from gi import require_version
-import fdb_query
 require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GLib, GObject  # pylint:disable=wrong-import-position
 try:
@@ -38,6 +36,7 @@ except ImportError:
     FileNotFoundError = EnvironmentError  # pylint: disable=redefined-builtin
     FileExistsError = ProcessLookupError = OSError  # pylint: disable=redefined-builtin
 
+import fdb_query
 
 class suppress_if_errno(object):
     """A context manager which suppresses exceptions with an errno attribute which matches the given value.
@@ -91,10 +90,11 @@ class Daemon(object):
 
     # pylint: disable=too-many-instance-attributes
 
-    def __init__(self, config):
+    def __init__(self, config, fdbquery):
         """Set up clipboard objects and history dict."""
 
         self.config = config
+        self.fdbquery = fdbquery
         self.patterns = []
         self.ignore_patterns = []
         self.window = self.p_id = self.c_id = self.sock = None
@@ -119,8 +119,6 @@ class Daemon(object):
                 logging.debug("Blacklist classes enabled for: %s", self.blacklist_classes)
         else:
             logging.error("'whitelist_classes' or 'blacklist_classes' require Wnck (libwnck3).")
-        # fdb_query.py's class instantiated here
-        self.fdbquery = fdb_query.FDBEmbedded()
 
     def keypress_handler(self, widget, event, board, tree_select):
         """Handle selection_widget keypress events."""
@@ -731,8 +729,10 @@ def main(debug_arg='INFO'):
 
     config = parse_config(data_dir, conf_dir)
 
+
+    fdb_driver = fdb_query.FDBEmbedded()
     # Launch the daemon
-    Daemon(config).run()
+    Daemon(config, fdb_driver).run()
 
 
 def safe_decode(data):

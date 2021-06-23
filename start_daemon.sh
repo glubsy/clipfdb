@@ -1,6 +1,5 @@
 #!/bin/bash
 # Wrapper script to toggle daemon on and off
-
 # ./clipster.py -d -l DEBUG
 
 script_base_dir=$(realpath "$0")
@@ -39,8 +38,8 @@ activate_venv(){
     if [ ! -z "${find_path}" ]; then
         path=$(realpath "${find_path}")
         if [ -f "${path}" ]; then 
+            echo "Found venv in \"${path}\". Activating..."
             source "${path}"
-            echo "Found venv in \"${path}\". Activating."
         fi
     fi;
 }
