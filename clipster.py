@@ -6,7 +6,6 @@
 
 from __future__ import print_function
 import signal
-# import argparse
 import json
 import socket
 import os
@@ -90,11 +89,11 @@ class Daemon(object):
 
     # pylint: disable=too-many-instance-attributes
 
-    def __init__(self, config, fdbquery):
+    def __init__(self, config):
         """Set up clipboard objects and history dict."""
 
         self.config = config
-        self.fdbquery = fdbquery
+        self.fdbquery = fdb_query.FDBController(self)
         self.patterns = []
         self.ignore_patterns = []
         self.window = self.p_id = self.c_id = self.sock = None
@@ -399,8 +398,7 @@ class Daemon(object):
         if text:
             logging.debug("Selection is text.")
             if selection == "CLIPBOARD":
-                if len(text) < 200: # avoid parsing too long data in firebird
-                    self.fdbquery.query_databases(text)
+                self.fdbquery.parse_and_query(text)
 
             self.update_history(selection, text)
             # If no text received, either the selection was an empty string,
@@ -619,7 +617,8 @@ class Daemon(object):
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, self.exit)
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGTERM, self.exit)
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGHUP, self.exit)
-        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, self.fdbquery.signal_handler)
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1,
+                             self.fdbquery.signal_handler)
 
         # Timeout for flushing history to disk
         # Do nothing if timeout is 0, or write_on_change is set in config
@@ -729,10 +728,8 @@ def main(debug_arg='INFO'):
 
     config = parse_config(data_dir, conf_dir)
 
-
-    fdb_driver = fdb_query.FDBEmbedded()
     # Launch the daemon
-    Daemon(config, fdb_driver).run()
+    Daemon(config).run()
 
 
 def safe_decode(data):

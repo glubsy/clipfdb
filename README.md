@@ -18,9 +18,9 @@ Note: the configuration for the clipboard monitoring part is still located in `~
 
 # Dependencies
 
-These should be installed automatically with `pip install -r -requirements.txt`:
+These can be installed automatically with `pip install -r -requirements.txt`:
 
-* The firebird python driver [fdb](https://pypi.org/project/fdb/) or [fdb_embedded](https://github.com/andrewleech/fdb_embedded). Install with either `pip install fdb` for the former or `git clone https://github.com/andrewleech/fdb_embedded.git` for the latter.
+* The firebird python driver [fdb](https://pypi.org/project/fdb/) or [fdb_embedded](https://github.com/andrewleech/fdb_embedded) (but that one seems deprecated). Install with either `pip install fdb` for the former or `git clone https://github.com/andrewleech/fdb_embedded.git` for the latter (or clone this repo with `--recurse` to download that as a submodule).
 
 * [notify2](https://pypi.python.org/pypi/notify2) (optional) or notify-send and a notifcation daemon (ie. dunst): `pip install notify2`. Warning: requires dbus python bindings, `pacman -S python-dbus` in Arch Linux.
 
@@ -53,12 +53,9 @@ Example below, disables icon, makes body bold and green / red on found / nothing
 
 # TODOs
 
-* Remove clipster code and only keep the very basic for hooking the clipboard
-
-* Write requirements.txt to ease (partially automate) installation process 
+* Remove clipster code and only keep the very basic for hooking the clipboard,
+or keep it as a submodule?
 
 * Better error handling (ie. invalid options)
 
 * Make firebird sql databases ourselves?
-
-* Make fdb_embedded an optional dependency when using a true Firebird server

@@ -33,7 +33,7 @@ running() {
 activate_venv(){
     # search and activate a virtual env if there is one found (assuming we used virtualenv)
     # only print path without ./ in front
-    find_path="$(find "${script_home}" -ipath "*/bin/activate" -printf "%p\n" | grep -i "/bin/activate")"
+    find_path="$(find "${script_home}" -ipath "*env/bin/activate" -printf "%p\n" | head -n 1)"
 
     if [ ! -z "${find_path}" ]; then
         path=$(realpath "${find_path}")
