@@ -194,7 +194,7 @@ class Daemon(object):
         """Set up clipboard objects and history dict."""
 
         self.config = config
-        self.fdb_handle = fdb_query.FDBController(self)
+        self.fdb_handle = fdb_query.FDBController()
         self.patterns = []
         self.ignore_patterns = []
         self.window = self.p_id = self.c_id = self.sock = None
@@ -677,6 +677,7 @@ class Daemon(object):
         """Clean up things before exiting."""
 
         logging.debug("Daemon exiting...")
+        self.fdb_handle.exit()
         try:
             os.unlink(self.sock_file)
         except FileNotFoundError:
@@ -715,8 +716,6 @@ class Daemon(object):
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, self.exit)
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGTERM, self.exit)
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGHUP, self.exit)
-        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1,
-                             self.fdb_handle.signal_handler)
 
         # Timeout for flushing history to disk
         # Do nothing if timeout is 0, or write_on_change is set in config

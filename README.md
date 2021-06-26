@@ -1,33 +1,49 @@
-Fork of [Clipster](https://github.com/mrichar1/clipster), with added classes to automatically search a local database
-for matches in CLIPBOARD clipboard (Linux only).
+This is a hack around [Clipster](https://github.com/mrichar1/clipster), with the added functionality to automatically search local databases for text received from the "CLIPBOARD" clipboard (Linux with Xorg only). This is achieved via a simple hook added to clipster.
 
 # How to use
 
 1. Create one or more Firebird databases with [VVV (Virtual Volume View)](http://vvvapp.sourceforge.net)
 
-2. Point to the directory holding security2.fdb, and your databases (two separate config items) in the config file which should be placed in `~/.config/clipfdb`
+2. Copy the default config file **clipfdb.conf** into `~/.config/clipfdb/`. Edit it to point to the directory holding **security2.fdb**, as well as your databases and credentials.
 
-3. Install dependencies: in a venv: `pip install virtualenv && virtualenv -p python3 --system-site-packages venv && source venv/bin/activate` and `pip install -r requirements.txt`
+3. Install required dependencies.
+Either system-wide or in a venv like this:
+```
+pip install virtualenv && virtualenv -p python3 --system-site-packages venv
+source ./venv/bin/activate
+pip install -r requirements.txt
+```
 
-4. start `start_daemon.sh`, preferably with a key binding (in i3: exec --no-startup-id "/path/to/start_daemon.sh") to toggle on/off. Can be started with argument "venv" to automatically find and activate a python virtualenv.
+1. start `start_daemon.sh`, preferably with a key binding to toggle it on/off. The Clipster client can also be used as usual.
+For example in i3 config file:
+```
+bindsym $mod+Shift+i exec --no-startup-id "/path/to/clipfdb/start_daemon.sh --venv --no-terminal-output"
+bindsym $mod+c exec --no-startup-id "/path/to/clipfdb/clipster/clipster -sc"
+```
+The shell script can be started with argument **--venv** to automatically find and activate a python venv.
 
-Files which have been found in the databases will be either printed to terminal (if started from one and config option is active)
-or/and simply display as a notification through your notification server (dunst, xfce4-notifyd, etc.) with optional sound effect.
+Files which have been found in the databases will be either printed to terminal (if started from one and is not suppressed by argument --no-terminal-output)
+or/and simply displayed as a notification through your notification server of choice (dunst, xfce4-notifyd, etc.) with optional sound effect.
 
-Note: the configuration for the clipboard monitoring part is still located in `~/.config/clipfdb/clipster.ini` for now
+Options can be overridden via command-line arguments.
+
+Note: the configuration for Clipster is still valid and and used. It should be in `~/.config/clipster/clipster.ini`.
 
 # Dependencies
 
 These can be installed automatically with `pip install -r -requirements.txt`:
 
-* The firebird python driver [fdb](https://pypi.org/project/fdb/) or [fdb_embedded](https://github.com/andrewleech/fdb_embedded) (but that one seems deprecated). Install with either `pip install fdb` for the former or `git clone https://github.com/andrewleech/fdb_embedded.git` for the latter (or clone this repo with `--recurse` to download that as a submodule).
+* The Firebird super-server, preferrably a version compatible with the databases created by VVV (most likely 2.5 currently).
 
-* [notify2](https://pypi.python.org/pypi/notify2) (optional) or notify-send and a notifcation daemon (ie. dunst): `pip install notify2`. Warning: requires dbus python bindings, `pacman -S python-dbus` in Arch Linux.
+* The Firebird python driver [fdb](https://pypi.org/project/fdb/) or [fdb_embedded](https://github.com/andrewleech/fdb_embedded). But note that it seems to be deprecated. It's kept as a submodule here for the time being, clone this repo with `--recurse` and get ready to fix it yourself.
 
-* [simpleaudio](https://pypi.python.org/pypi/simpleaudio/) to play sounds (optional) or paplay `pip install simpleaudio`.
+* [notify2](https://pypi.python.org/pypi/notify2) (optional) or notify-send and a notification daemon (ie. dunst).
+Warning: requires dbus python bindings, `pacman -S python-dbus` in Arch Linux.
 
+* [simpleaudio](https://pypi.python.org/pypi/simpleaudio/) (optional) or paplay to play sound notifications.
+Actually any process can be called in place of paplay.
 
-# TIPS
+# Tips
 
 Create config directory ~/.config/clipfdb/ and copy clipfdb.conf.
 
@@ -51,11 +67,10 @@ Example below, disables icon, makes body bold and green / red on found / nothing
 ```
 
 
-# TODOs
+# TODO
 
-* Remove clipster code and only keep the very basic for hooking the clipboard,
-or keep it as a submodule?
+* Try not to rely on clipster anymore, especially for future Wayland support.
 
-* Better error handling (ie. invalid options)
+* Write a module to generate Firebird SQL databases ourselves.
 
-* Make firebird sql databases ourselves?
+* Allow other SQL databases through API abstraction.

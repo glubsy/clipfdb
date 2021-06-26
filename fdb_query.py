@@ -2,12 +2,12 @@
 from os import environ, path, sep
 import re
 # import sys
-from subprocess import Popen
+from subprocess import run, CalledProcessError
 # import json
 from operator import itemgetter
 from locale import setlocale, strxfrm, LC_ALL
 from argparse import BooleanOptionalAction, ArgumentParser
-from configparser import SafeConfigParser
+from configparser import ConfigParser
 # from ast import literal_eval
 from urllib import parse
 # import typing
@@ -41,36 +41,34 @@ except ImportError:
 class FDBController():
     """Handles querying VVV firebird databases locally"""
 
-    def __init__(self, parent):
-        self.parent = parent
+    def __init__(self):
         args, _ = parse_args()
         self.config = init_config(args)
         self.is_disabled = False
 
-        self.wants_notifications = self.config.getboolean('clipfdb', 'notifications')
-        self.wants_sound_notifications = self.config.getboolean('clipfdb', 'sound_notifications')
         self.wants_terminal_output = self.config.getboolean('clipfdb', "terminal_output")
-        # self.wants_parent_directories = self.config.getboolean('clipfdb', "parent_directories")
 
         if not self.wants_terminal_output \
-        and not self.wants_sound_notifications \
-        and not self.wants_notifications:
+        and not self.config.getboolean('clipfdb', 'sound_notifications') \
+        and not self.config.getboolean('clipfdb', 'notifications'):
             self.is_disabled = True
             return
 
-        # initialize objects instances
         self.notifier = Notifier(self.config)
+        self.snd_notifier = SoundNotifier(self.config)
+
+        self.snd_notifier.play(self.snd_notifier.startup_sound)
 
         # Sets up the FIREBIRD env var for securty2.fdb lookup
         # Point to our current VVV firebird database (for security2.fdb)
         # environ['FIREBIRD'] = '~/INSTALLED/VVV-1.3.0-x86_64/firebird'
         # Alternatively, use a copy of the security2.fdb in that path:
-        #FIXME can we have separate security2.fdb files for each database?
+        # TODO we could have a separate security2.fdb files for each database
         environ['FIREBIRD'] = self.config.get('clipfdb', 'security2_path')
-        setlocale(LC_ALL, "") #TODO: add to config options for sorting?
+        # TODO add to config file options for alternative sorting
+        setlocale(LC_ALL, "")
 
         self.db_handles = []
-
         # Ignore the "clipfdb" top section
         for db_section in self.config.sections()[1:]:
             self.db_handles.append(
@@ -82,13 +80,11 @@ class FDBController():
                 )
             )
 
-        self.snd_notifier = SoundNotificator(self.config)
-
-    def signal_handler(self):
-        """Called from Clipster. Handle SIGUSR1 signal to terminate gracefully
-        after the current query has finished"""
-        self.snd_notifier.play(self.snd_notifier.shutdown_sound)
-        self.parent.exit()
+    def exit(self):
+        """Called from Clipster Daemon."""
+        if getattr(self, "snd_notifier", None) is not None:
+            self.snd_notifier.play(self.snd_notifier.shutdown_sound)
+        # self.parent.exit()
         # sys.exit(0)
 
     def query(self, clipboard_str):
@@ -358,17 +354,15 @@ in {BColors.BOLD}{query_dict.get('db_filename')}{BColors.ENDC}\n\
 
 class Notifier():
     def __init__(self, config):
+        self._provider = None
         if not config.getboolean('clipfdb', 'notifications'):
-            self._provider = None
             return
 
         if config.get('clipfdb', 'notification_provider') == "notify2"\
         and NOTIFY2_AVAIL:
             self._provider = Notifier2()
-        elif config.get('clipfdb', 'notification_provider') == "notify-send":
-            self._provider = NotifierSend()
         else:
-            self._provider = None
+            self._provider = SPNotifier(config)
 
     def notify(self, message):
         if self._provider is None:
@@ -376,11 +370,23 @@ class Notifier():
         return self._provider.notify(message)
 
 
-class NotifierSend():
-    """Use notify-send as a subprocess"""
+class SPNotifier():
+    """Use a subprocess to send notification (notifier-send by default)"""
+    def __init__(self, config):
+        self.process_unavail = False
+        self.process_name = config.get('clipfdb', 'notification_provider',
+                                       fallback='notify-send')
+        if not self.process_name:
+            print(f"Error. Notification provider \"{self.process_name}\" is incorrect.")
+            self.process_unavail = True
+            return
+        print(f"Using subprocess \"{self.process_name}\" for desktop notifications.")
 
     def notify(self, message):
         """Pass dict['valid_words', 'count', 'original_word']."""
+
+        if self.process_unavail:
+            return
 
         if message['count'] > 0:
             category = 'clipfdb_found'
@@ -395,29 +401,27 @@ class NotifierSend():
             found_words += "".join([item, " ", bytes_2_human_readable(size),
                                     " ", str(pardir), "\n"])
 
-        ret_code = 1
         try:
             # cmd = ['notify-send', '-c', category, '-i', 'dialog-information', summary, found_words]
-            cmd = ['notify-send', '-c', category, summary, found_words]
-            # subprocess_call = Popen(cmd, shell=,False, stdout=logfile, stderr=logfile)
-            subprocess_call = Popen(cmd, shell=False, \
-            stdout=None, stderr=None)
-            # out, err = subprocess_call.communicate()
-
-            # FIXME maybe not needed and slows down?
-            ret_code = subprocess_call.wait()
-            # print("DEBUG notifier_send_wrapper() return code: " + str(ret_code))
+            cmd = [self.process_name, '-c', category, summary, found_words]
+            run(cmd,
+                shell=False,
+                # check=True,
+                stdout=None, stderr=None)
+        # except CalledProcessError as e:
+        #     print(f"Process \"{self.process_name}\" error: {e}")
+        #     self.process_unavail = True
         except Exception as e:
-            print(f"Error with notify-send: {e}")
-        return ret_code
+            print(f"Error from \"{self.process_name}\": {e}")
+            self.process_unavail = True
 
 
 class Notifier2():
     """Use notify2 library."""
-
     def __init__(self):
         notify2.init("clipboard")
         self.timeout = 5000  # 5 seconds
+        print(f"Using notify2 library for desktop notifications.")
         # DEBUG
         # info = notify2.get_server_info()
         # caps = notify2.get_server_caps()
@@ -454,12 +458,12 @@ class Notifier2():
             print(f"Exception in notify2.show(): {e}")
 
 
-class SoundNotificator():
+class SoundNotifier():
     def __init__(self, config):
         if config.get('clipfdb', 'sound_provider') == 'simpleaudio' and SA_AVAIL:
             self._provider = SAProvider(config)
         else:
-            self._provider = PAProvider(config)
+            self._provider = SPProvider(config)
 
     def play(self, snd):
         if not snd:
@@ -482,6 +486,17 @@ class SoundNotificator():
 
 class SoundNotificationProvider():
     """Abstract Base Class"""
+    def __init__(self, config):
+        self.config = config
+        self.success_sound = None
+        self.failure_sound = None
+        self.startup_sound = None
+        self.shutdown_sound = None
+        self.load_sound_files(config)
+
+    def load_sound_files(self, config):
+        pass
+
     def play(self, snd):
         if not snd:
             return
@@ -493,13 +508,19 @@ class SoundNotificationProvider():
 
 class SAProvider(SoundNotificationProvider):
     """Wrapper for simpleaudio library."""
-    def __init__(self, config):
-        self.success_sound = self.make_wave(config.get('clipfdb', 'success_sound'))
-        self.failure_sound = self.make_wave(config.get('clipfdb', 'failure_sound'))
-        self.startup_sound = self.make_wave(config.get('clipfdb', 'startup_sound'))
-        self.shutdown_sound = self.make_wave(config.get('clipfdb', 'shutdown_sound'))
-        if config.getboolean('clipfdb', 'sound_notifications'):
-            self.play(self.startup_sound)
+    def load_sound_files(self, config):
+        # Only load startup and shutdown sounds unconditionally
+        # to play them regardless of config option chosen
+        self.startup_sound = self.make_wave(
+            config.get('clipfdb', 'startup_sound', fallback=None))
+        self.shutdown_sound = self.make_wave(
+            config.get('clipfdb', 'shutdown_sound', fallback=None))
+
+        if self.config.getboolean('clipfdb', 'sound_notifications'):
+            self.success_sound = self.make_wave(
+                config.get('clipfdb', 'success_sound', fallback=None))
+            self.failure_sound = self.make_wave(
+                config.get('clipfdb', 'failure_sound', fallback=None))
 
     def make_wave(self, path):
         valid = path_or_none(path)
@@ -512,32 +533,45 @@ class SAProvider(SoundNotificationProvider):
         played.wait_done()
 
 
-class PAProvider(SoundNotificationProvider):
-    """Wrapper for paplay subprocess."""
+class SPProvider(SoundNotificationProvider):
+    """Wrapper for a subprocess (paplay by default)."""
     def __init__(self, config):
-        self.success_sound = path_or_none(config.get('clipfdb', 'success_sound'))
-        self.failure_sound = path_or_none(config.get('clipfdb', 'failure_sound'))
-        self.startup_sound = path_or_none(config.get('clipfdb', 'startup_sound'))
-        self.shutdown_sound = path_or_none(config.get('clipfdb', 'shutdown_sound'))
-        if config.getboolean('clipfdb', 'sound_notifications'):
-            self.play(self.startup_sound)
+        self.process_unavail = False
+        self.process_name = config.get('clipfdb', 'sound_provider',
+                                       fallback='paplay')
+        if not self.process_name:
+            print(f"Error. Sound provider \"{self.process_name}\" is incorrect.")
+            self.process_unavail = True
+            return
+        print(f"Using sound provider \"{self.process_name}\".")
+        super().__init__(config)
+
+    def load_sound_files(self, config):
+        # Only load startup and shutdown sounds unconditionally
+        # to play them regardless of config option chosen
+        self.startup_sound = path_or_none(config.get('clipfdb', 'startup_sound', fallback=None))
+        self.shutdown_sound = path_or_none(config.get('clipfdb', 'shutdown_sound', fallback=None))
+
+        if self.config.getboolean('clipfdb', 'sound_notifications'):
+            self.success_sound = path_or_none(config.get('clipfdb', 'success_sound', fallback=None))
+            self.failure_sound = path_or_none(config.get('clipfdb', 'failure_sound', fallback=None))
 
     def _play(self, snd_path):
-        ret = -1
+        if self.process_unavail:
+            return
         try:
-            cmd = ['paplay', snd_path]
-            # subprocess_call = Popen(cmd, shell=,False, stdout=logfile, stderr=logfile)
-            subprocess_call = Popen(cmd, shell=False, \
-            stdout=None, stderr=None)
+            run([self.process_name, snd_path],
+                shell=False,
+                # check=True,
+                stdout=None, stderr=None)
             # out, err = subprocess_call.communicate()
-
-            #FIXME: maybe not needed and slows down?
-            ret = subprocess_call.wait()
+            # ret = subprocess_call.wait() #FIXME: maybe not needed and slows down?
+        # except CalledProcessError as e:
+        #     print(f"Process error playing {snd_path} with \"{self.process_name}\": {e}")
+        #     self.process_unavail = True
         except Exception as e:
-            print(f"Error playing {snd_path} with paplay: {e}")
-        # finally:
-            # print(f"paplay return code: {ret}")
-        return ret
+            print(f"Error playing {snd_path} with \"{self.process_name}\": {e}")
+            self.process_unavail = True
 
 
 def find_config():
@@ -658,15 +692,15 @@ each found item in database.")
 
     parser.add_argument('--notification-provider', action="store",
                         type=str, default="notify2",
-                        choices=['notify2', 'notify-send'],
+                        # choices=['notify2', 'notify-send'],
                         help="Desktop notification provider: notify2 library or \
-notify-send subprocess")
+notify-send subprocess. [notify2|notify-send|...")
 
     parser.add_argument('--sound-provider', action="store",
                         type=str, default="simpleaudio",
-                        choices=['simpleaudio', 'paplay'],
+                        # choices=['simpleaudio', 'paplay'],
                         help="Backend provider to play sounds, either python \
-library or external program.")
+library or external program. [simpleaudio|paplay|...]")
 
     parser.add_argument('--max-results', action="store",
                         type=int, default=20,
@@ -698,7 +732,7 @@ def init_config(args):
                         "shutdown_sound": "" # absolute path
                         }
 
-    config = SafeConfigParser(config_defaults)
+    config = ConfigParser(config_defaults)
     config.add_section('clipfdb')
     conf_file = conf_dir + sep + "clipfdb.conf"
     result = config.read(conf_file)
