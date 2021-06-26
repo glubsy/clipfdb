@@ -1,3 +1,6 @@
 [submodule "fdb_embedded"]
 	path = fdb_embedded
 	url = https://github.com/andrewleech/fdb_embedded
+[submodule "clipster"]
+	path = clipster
+	url = https://github.com/mrichar1/clipster

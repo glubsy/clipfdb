@@ -1,4 +1,4 @@
-#!/bin/env python
+#!/usr/bin/python
 
 """Clipster - Clipboard manager."""
 
@@ -6,6 +6,7 @@
 
 from __future__ import print_function
 import signal
+import argparse
 import json
 import socket
 import os
@@ -15,6 +16,7 @@ import logging
 import tempfile
 import re
 import stat
+from contextlib import closing
 from gi import require_version
 require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GLib, GObject  # pylint:disable=wrong-import-position
@@ -23,13 +25,13 @@ try:
     from gi.repository import Wnck
 except (ImportError, ValueError):
     Wnck = None
-try:
+
+if sys.version_info.major == 3:
     # py 3.x
-    import configparser
-except ImportError:
+    from configparser import ConfigParser as SafeConfigParser
+else:
     # py 2.x
-    import ConfigParser as configparser
-    # Use this as a handy place to make some other compatibility hacks
+    from ConfigParser import SafeConfigParser  # pylint:disable=import-error
     # In python 2, ENOENT is sometimes IOError and sometimes OSError. Catch
     # both by catching their immediate superclass exception EnvironmentError.
     FileNotFoundError = EnvironmentError  # pylint: disable=redefined-builtin
@@ -84,6 +86,105 @@ class ClipsterError(Exception):
         Exception.__init__(self, args)
 
 
+class Client(object):
+    """Clipboard Manager."""
+
+    def __init__(self, config, args):
+        self.config = config
+        self.args = args
+        self.client_action = "SEND"
+        if args.select:
+            self.client_action = "SELECT"
+        elif args.ignore:
+            self.client_action = "IGNORE"
+        elif args.delete is not None:
+            self.client_action = "DELETE"
+        elif args.erase_entire_board:
+            self.client_action = "ERASE"
+        elif args.output or args.search is not None:
+            self.client_action = "BOARD"
+        logging.debug("client_action: %s", self.client_action)
+
+    def update(self):
+        """Send a signal and (optional) data from STDIN to daemon socket."""
+
+        logging.debug("Connecting to server to update.")
+        with closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as sock:
+            # pylint doesn't like contextlib.closing (https://github.com/PyCQA/astroid/issues/347)
+            # pylint:disable=no-member
+            try:
+                sock.connect(self.config.get('clipster', "socket_file"))
+            except (socket.error, OSError):
+                raise ClipsterError("Error connecting to socket. Is daemon running?")
+            logging.debug("Sending request to server.")
+            # Fix for http://bugs.python.org/issue1633941 in py 2.x
+            # Send message 'header' - count is 0 (i.e to be ignored)
+            sock.sendall("{0}:{1}:0".format(self.client_action,
+                                            self.config.get('clipster',
+                                                            'default_selection')).encode('utf-8'))
+
+            if self.client_action == "DELETE":
+                # Send delete args
+                sock.sendall(":{0}".format(self.args.delete).encode('utf-8'))
+
+            if self.client_action == "SEND":
+                # Send data read from stdin
+                buf_size = 8192
+                # Send another colon to show that content is coming
+                # Needed to distinguish empty content from no content
+                # e.g. when stdin is empty
+                sock.sendall(":".encode('utf-8'))
+                while True:
+                    if sys.stdin.isatty():
+                        recv = sys.stdin.readline(buf_size)
+                    else:
+                        recv = sys.stdin.read(buf_size)
+                    if not recv:
+                        break
+                    recv = safe_decode(recv)
+                    sock.sendall(recv.encode('utf-8'))
+
+    def output(self):
+        """Send a signal and count to daemon socket requesting items from history."""
+
+        logging.debug("Connecting to server to query history.")
+        with closing(socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)) as sock:
+            # pylint doesn't like contextlib.closing (https://github.com/PyCQA/astroid/issues/347)
+            # pylint:disable=no-member
+            try:
+                sock.connect(self.config.get('clipster', "socket_file"))
+            except socket.error:
+                raise ClipsterError("Error connecting to socket. Is daemon running?")
+            logging.debug("Sending request to server.")
+            # Send message 'header'
+            message = "{0}:{1}:{2}".format(self.client_action,
+                                           self.config.get('clipster',
+                                                           'default_selection'),
+                                           self.args.number)
+            if self.args.search:
+                message = "{0}:{1}".format(message, self.args.search)
+            sock.sendall(message.encode('utf-8'))
+
+            sock.shutdown(socket.SHUT_WR)
+            data = []
+            while True:
+                try:
+                    recv = sock.recv(8192)
+                    logging.debug("Received data from server.")
+                    if not recv:
+                        break
+                    data.append(safe_decode(recv))
+                except socket.error:
+                    break
+        if data:
+            # data is a list of 1 or more parts of a json string.
+            # Reassemble this, then join with delimiter
+            json_data = json.loads(''.join(data))
+            if self.args.position is not None:
+                json_data = json_data[self.args.position]
+            return self.args.delim.join(json_data)
+
+
 class Daemon(object):
     """Handles clipboard events, client requests, stores history."""
 
@@ -93,7 +194,7 @@ class Daemon(object):
         """Set up clipboard objects and history dict."""
 
         self.config = config
-        self.fdbquery = fdb_query.FDBController(self)
+        self.fdb_handle = fdb_query.FDBController(self)
         self.patterns = []
         self.ignore_patterns = []
         self.window = self.p_id = self.c_id = self.sock = None
@@ -373,7 +474,7 @@ class Daemon(object):
         # in whitelist and not found in blacklist
         if self.whitelist_classes or self.blacklist_classes:
             wm_class = get_wm_class_from_active_window().lower()
-            if (self.whitelist_classes and wm_class not in self.whitelist_classes) or \
+            if (wm_class and self.whitelist_classes and wm_class not in self.whitelist_classes) or \
                (self.blacklist_classes and wm_class in self.blacklist_classes):
                 logging.debug("Ignoring active window.")
                 return True
@@ -383,22 +484,16 @@ class Daemon(object):
         # Some apps update primary during mouse drag (chrome)
         # Block at start to prevent repeated triggering
         board.handler_block(event_id)
-        # FIXME: this devs hack is a bit verbose. Look instead at
-        # gdk_seat_get_pointer -> gdk_device_get_state
-        # once GdkSeat is in stable
-        for dev in self.window.get_display().get_device_manager().list_devices(Gdk.DeviceType.MASTER):
-            if dev.get_source() == Gdk.InputSource.MOUSE:
-                while Gdk.ModifierType.BUTTON1_MASK & self.window.get_root_window().get_device_position(dev)[3]:
-                    # Do nothing while mouse button is held down (selection drag)
-                    pass
-            break
-
+        display = self.window.get_display()
+        while Gdk.ModifierType.BUTTON1_MASK & display.get_pointer().mask:
+            # Do nothing while mouse button is held down (selection drag)
+            pass
         # Try to get text from clipboard
         text = board.wait_for_text()
         if text:
             logging.debug("Selection is text.")
             if selection == "CLIPBOARD":
-                self.fdbquery.parse_and_query(text)
+                self.fdb_handle.query(text)
 
             self.update_history(selection, text)
             # If no text received, either the selection was an empty string,
@@ -602,12 +697,15 @@ class Daemon(object):
 
         # Set up socket, pid file etc
         self.prepare_files()
+
         # We need to get the display instance from the window
         # for use in obtaining mouse state.
         # POPUP windows can do this without having to first show the window
         self.window = Gtk.Window(type=Gtk.WindowType.POPUP)
 
         # Handle clipboard changes
+        self.p_id = self.primary.connect('owner-change',
+                                         self.owner_change)
         self.c_id = self.clipboard.connect('owner-change',
                                            self.owner_change)
         # Handle socket connections
@@ -618,7 +716,7 @@ class Daemon(object):
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGTERM, self.exit)
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGHUP, self.exit)
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1,
-                             self.fdbquery.signal_handler)
+                             self.fdb_handle.signal_handler)
 
         # Timeout for flushing history to disk
         # Do nothing if timeout is 0, or write_on_change is set in config
@@ -636,9 +734,12 @@ def get_wm_class_from_active_window():
     screen = Wnck.Screen.get_default()
     screen.force_update()
     active_window = screen.get_active_window()
-    wm_class = active_window.get_class_group_name()
-    logging.debug("Active window class is %s", wm_class)
-    return wm_class
+    if active_window:
+        wm_class = active_window.get_class_group_name()
+        logging.debug("Active window class is %s", wm_class)
+        return wm_class
+    else:
+        return ""
 
 
 def get_list_from_option_string(string):
@@ -650,11 +751,58 @@ def get_list_from_option_string(string):
     return []
 
 
-def parse_config(data_dir, conf_dir):
+def parse_args():
+    """Parse command-line arguments."""
+
+    parser = argparse.ArgumentParser(description='Clipster clipboard manager.')
+    parser.add_argument('-f', '--config', action="store",
+                        help="Path to config directory.")
+    parser.add_argument('-l', '--log_level', action="store", default="INFO",
+                        help="Set log level: DEBUG, INFO (default), WARNING, ERROR, CRITICAL")
+    # Mutually exclusive client and daemon options.
+    boardgrp = parser.add_mutually_exclusive_group()
+    boardgrp.add_argument('-p', '--primary', action="store_const", const='PRIMARY',
+                          help="Query, or write STDIN to, the PRIMARY clipboard.")
+    boardgrp.add_argument('-c', '--clipboard', action="store_const", const='CLIPBOARD',
+                          help="Query, or write STDIN to, the CLIPBOARD clipboard.")
+    boardgrp.add_argument('-d', '--daemon', action="store_true",
+                          help="Launch the daemon.")
+
+    # Mutually exclusive client actions
+    actiongrp = parser.add_mutually_exclusive_group()
+    actiongrp.add_argument('-s', '--select', action="store_true",
+                           help="Launch the clipboard history selection window.")
+    actiongrp.add_argument('-o', '--output', action="store_true",
+                           help="Output selection from history. (See -n and -S).")
+    actiongrp.add_argument('-i', '--ignore', action="store_true",
+                           help="Instruct daemon to ignore next update to clipboard.")
+    actiongrp.add_argument('-r', '--delete', action="store", nargs='?', const='',
+                           help="Delete from clipboard. Deletes matching text, or if no argument given, deletes last item.")
+    actiongrp.add_argument('--erase-entire-board', action="store_true",
+                           help="Delete all items from the clipboard.")
+    parser.add_argument('-N', '--position', action="store", type=int,
+                        help="Return an entry from a specific indexed position. Defaults to -1 (last entry).")
+    parser.add_argument('-n', '--number', action="store", type=int, default=1,
+                        help="Number of lines to output: defaults to 1 (See -o). 0 returns entire history.")
+
+    parser.add_argument('-S', '--search', action="store",
+                        help="Pattern to match for output.")
+
+    # --delim must come before -0 to ensure delim is set correctly
+    # otherwise if neither arg is passed, delim=None
+    parser.add_argument('-m', '--delim', action="store", default='\n',
+                        help="String to use as output delimiter (defaults to '\n')")
+    parser.add_argument('-0', '--nul', action="store_const", const='\0', dest='delim',
+                        help="Use NUL character as output delimiter.")
+
+    return parser.parse_known_args()
+
+
+def parse_config(args, data_dir, conf_dir):
     """Configuration derived from defaults & file."""
 
     # Set some config defaults
-    config_defaults = {"data_dir": data_dir,  # clipster 'root' dir (see history/socket/pid file config)
+    config_defaults = {"data_dir": data_dir,  # clipster 'root' dir (see history/socket config)
                        "conf_dir": conf_dir,  # clipster config dir (see pattern/ignore_pattern file config). Can be overridden using -f cmd-line arg.
                        "default_selection": "PRIMARY",  # PRIMARY or CLIPBOARD
                        "active_selections": "PRIMARY,CLIPBOARD",  # Comma-separated list of selections to monitor/save
@@ -664,7 +812,7 @@ def parse_config(data_dir, conf_dir):
                        "history_update_interval": "60",  # Flush history to disk every N seconds, if changed (0 disables timeout)
                        "write_on_change": "no",  # Always write history file immediately (overrides history_update_interval)
                        "socket_file": "%(data_dir)s/clipster_sock",
-                       "pid_file": "%(data_dir)s/clipster.pid",
+                       "pid_file": "/run/user/{}/clipster.pid".format(os.getuid()),
                        "max_input": "50000",  # max length of selection input
                        "row_height": "3",  # num rows to show in widget
                        "duplicates": "no",  # allow duplicates, or instead move the original entry to top
@@ -679,10 +827,12 @@ def parse_config(data_dir, conf_dir):
                        "blacklist_classes": "",  # Comma-separated list of WM_CLASS to identify apps from which to ignore owner-change events
                        "whitelist_classes": ""}  # Comma-separated list of WM_CLASS to identify apps from which to not ignore owner-change events
 
-    config = configparser.SafeConfigParser(config_defaults)
+    config = SafeConfigParser(config_defaults)
     config.add_section('clipster')
 
     # Try to read config file (either passed in, or default value)
+    if args.config:
+        config.set('clipster', 'conf_dir', args.config)
     conf_file = os.path.join(config.get('clipster', 'conf_dir'), 'clipster.ini')
     logging.debug("Trying to read config file: %s", conf_file)
     result = config.read(conf_file)
@@ -704,32 +854,55 @@ def find_config():
     xdg_config_dirs.insert(0, os.environ.get('XDG_CONFIG_HOME', os.path.join(os.environ.get('HOME'), ".config")))
     xdg_data_home = os.environ.get('XDG_DATA_HOME', os.path.join(os.environ.get('HOME'), ".local/share"))
 
-    data_dir = os.path.join(xdg_data_home, "clipfdb")
+    data_dir = os.path.join(xdg_data_home, "clipster")
     # Keep trying to define conf_dir, moving from local -> global
     for path in xdg_config_dirs:
-        conf_dir = os.path.join(path, 'clipfdb')
+        conf_dir = os.path.join(path, 'clipster')
         if os.path.exists(conf_dir):
             return conf_dir, data_dir
     return "", data_dir
 
 
-def main(debug_arg='INFO'):
+def main():
     """Start the application. Return an exit status (0 or 1)."""
 
     # Find default config and data dirs
     conf_dir, data_dir = find_config()
 
-    # debug_arg is either INFO (default), DEBUG
+    # parse command-line arguments
+    args, _ = parse_args()
+
+    # Ensure that number is 0 if position is used to get all history
+    if args.position is not None:
+        args.number = 0
 
     # Enable logging
     logging.basicConfig(format='%(levelname)s:%(message)s',
-                        level=debug_arg)
+                        level=getattr(logging, args.log_level.upper()))
     logging.debug("Debugging Enabled.")
 
-    config = parse_config(data_dir, conf_dir)
+    config = parse_config(args, data_dir, conf_dir)
 
     # Launch the daemon
-    Daemon(config).run()
+    if args.daemon:
+        Daemon(config).run()
+    else:
+        board = args.primary or args.clipboard or config.get('clipster', 'default_selection')
+        if board not in config.get('clipster', 'active_selections'):
+            raise ClipsterError("{0} not in 'active_selections' in config.".format(board))
+        config.set('clipster', 'default_selection', board)
+        client = Client(config, args)
+
+        if args.output:
+            # Ask server for clipboard history
+            output = client.output()
+            if not isinstance(output, str):
+                # python2 needs unicode explicitly encoded
+                output = output.encode('utf-8')
+            print(output, end='')
+        else:
+            # Read from stdin and send to server
+            client.update()
 
 
 def safe_decode(data):
@@ -740,15 +913,6 @@ def safe_decode(data):
     except (UnicodeDecodeError, UnicodeEncodeError, AttributeError):
         pass
     return data
-
-def init():
-    """returns config to pass to Daemon"""
-    try:
-        conf_dir, data_dir = find_config()
-        return parse_config(data_dir, conf_dir)
-
-    except Exception as e:
-        print("Exception: " + str(e))
 
 
 if __name__ == "__main__":
