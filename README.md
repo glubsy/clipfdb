@@ -66,8 +66,11 @@ Example below, disables icon, makes body bold and green / red on found / nothing
     new_icon = off
 ```
 
-
 # TODO
+
+* Allow multiple lines to be parsed in turn (remove splitting on the first newline).
+
+* Enqueue requests for several rapid fire clipboard copies.
 
 * Try not to rely on clipster anymore, especially for future Wayland support.
 

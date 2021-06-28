@@ -133,35 +133,33 @@ class FDBController():
 repattern_tumblr = re.compile(r'(tumblr_.*o)[1-9]+_.*\..*', re.I)
 # e.g. (tumblr_inline_abcdeo)_540.jpg
 repattern_tumblr_inline = re.compile(r'(tumblr_inline_.*)_.{3,4}.*', re.I)
+# matches t.umblr redirects
 repattern_tumblr_redirect = re.compile(r't\.umblr\.com\/redirect\?z=(.*)&t=.*', re.I)
 repattern_extensions = re.compile(r'^(.*)(?:\.(?:mp4|webm|avi|mov|mkv|zip|rar|7z|gif|jpeg|jpg|png))$', re.I)
+# https://pbs.twimg.com/media/XXXXXXXXXXXXXXX?format=jpg&name=orig
+tter_repattern = re.compile(r'https?:\/\/pbs\.twimg\.com\/media\/(.{15})\?.*')
 
 
 def filter_content(clipboard_str):
-    """isolate filename from URIs, extensions and whatnot,
-    returns dic{'validwords', 'count', 'original_string'} """
-
-    line = clipboard_str.split("\n")[0] # we stop at the first newline found
-    if len(line) < 4: # skip if under 4 characters
+    line = clipboard_str.split("\n")[0]  # Stop at the first newline
+    if len(line) < 4:  # Too short for efficient query
         return None
 
-    if "mega.nz/file" in line:
+    if "mega.nz" in line:
         return None
-
-    reresult = repattern_tumblr_redirect.search(line)
-    if reresult: #matches t.umblr redirects
-    #if "t.umblr.com/redirect" in board_content:
-        #result = parse.unquote(result.split("?z=")[1].split("&t=")[0])
-        line = parse.unquote(reresult.group(1))
-
-    if "tumblr" in line:
-        reresult = repattern_tumblr.search(line)
-        if reresult: # matches regular tumblr url
-            line = reresult.group(1)
+    elif "twimg.com/media" in line:
+        if match := tter_repattern.search(line):
+            line = match.group(1)
+    elif "t.umblr.com/redirect" in line:
+        if match := repattern_tumblr_redirect.search(line):
+            line = parse.unquote(match.group(1))
+    elif "tumblr" in line:
+        if match := repattern_tumblr.search(line):
+            # matches regular tumblr url
+            line = match.group(1)
         else:
-            reresult = repattern_tumblr_inline.search(line)
-            if reresult: # matches inline url
-                line = reresult.group(1)
+            if match := repattern_tumblr_inline.search(line):
+                line = match.group(1)
 
     if line.endswith("/"):
         line = line[:-1]
@@ -174,10 +172,12 @@ def filter_content(clipboard_str):
     # except Exception as e:
     #     print(e)
 
-    if line.find("http://") != int(-1) or line.find("https://") != int(-1):
+    if line.find("http://") != -1 or line.find("https://") != -1:
+        # remove the schema
         result = line.split("/")[-1]
-        #FIXME more params possible here, only one hardcoded case!
-        if result.find("?"):
+
+        # FIXME this seems to be related to one of the rules above
+        if result.find("?image=") != -1:
             line = line.split("?image=")[-1]
 
         line = parse.unquote_plus(line)
@@ -186,8 +186,7 @@ def filter_content(clipboard_str):
     line = line.split("/")[-1]
 
     # Remove known extensions
-    ext = repattern_extensions.search(line)
-    if ext:
+    if ext := repattern_extensions.search(line):
         line = parse.unquote(ext.group(1))
 
     # Still too short for query
