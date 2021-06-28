@@ -87,9 +87,13 @@ class FDBController():
         if self.is_disabled:
             self.snd_notifier.play(self.snd_notifier.shutdown_sound)
             self.notifier.simple_notify("Paused clipfdb")
+            if self.wants_terminal_output:
+                print("Paused clipfdb.")
         else:
             self.snd_notifier.play(self.snd_notifier.startup_sound)
             self.notifier.simple_notify("Resumed clipfdb")
+            if self.wants_terminal_output:
+                print("Resumed clipfdb.")
 
     def exit(self):
         """Called from Clipster Daemon."""
@@ -377,10 +381,10 @@ class Notifier():
         else:
             self._provider = SPNotifier(config)
 
-    def simple_notify(self, message):
+    def simple_notify(self, message, timeout=1000):
         if self._provider is None:
             return
-        return self._provider.simple_notify(message)
+        return self._provider.simple_notify(message, timeout)
 
     def notify(self, message):
         if self._provider is None:
@@ -399,12 +403,10 @@ class SPNotifier():
             self.process_unavail = True
             return
         print(f"Using subprocess \"{self.process_name}\" for desktop notifications.")
-        self.short_timeout = 1000  # 1 second
-        # timeout is defined in the notification server's config (per category)
 
-    def simple_notify(self, message):
+    def simple_notify(self, message, timeout):
         """Show a generic message."""
-        self.call_process(("-t", str(self.short_timeout), message))
+        self.call_process(("-t", str(timeout), message))
 
     def notify(self, message):
         """Prepare arguments for the notification tool.
@@ -449,7 +451,6 @@ class Notifier2():
     """Use notify2 library."""
     def __init__(self):
         notify2.init("clipboard")
-        self.short_timeout = 1000  # 1 second
         self.timeout = 5000  # 5 seconds
         print(f"Using notify2 library for desktop notifications.")
         # DEBUG
@@ -459,10 +460,12 @@ class Notifier2():
         # print("caps:\n" + json.dumps(caps))
         # self.sendnotification("FDB_QUERY")
 
-    def simple_notify(self, message):
-        """Show a generic message."""
+    def simple_notify(self, message, timeout=1000):
+        """Show a generic message.
+        :param message str short message
+        :param timeout int display duration in milliseconds"""
         notif = notify2.Notification(message)
-        notif.timeout = self.short_timeout
+        notif.timeout = timeout
         notif.show()
 
     def notify(self, message):
