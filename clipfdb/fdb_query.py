@@ -2,7 +2,7 @@
 from os import environ, path, sep
 import re
 # import sys
-from subprocess import run, CalledProcessError
+from subprocess import run
 # import json
 from operator import itemgetter
 from locale import setlocale, strxfrm, LC_ALL
@@ -12,17 +12,9 @@ from configparser import ConfigParser
 from urllib import parse
 # import typing
 
-from constants import BColors
+from .constants import BColors
 
-try:
-    import fdb
-    # import fdb_embedded as fdb
-except ImportError as e:
-    print(f"Error importing fdb: {e}")
-    print(BColors.FAIL + "Warning: fdb_embedded couldn't be imported,\n" + \
-            "We won't be able to check the Firebird database with our embedded client.\n" \
-            + "Make sure you've installed the fdb_embedded package correctly." + BColors.ENDC)
-    raise
+import fdb
 
 try:
     import notify2
@@ -57,7 +49,9 @@ class FDBController():
         self.notifier = Notifier(self.config)
         self.snd_notifier = SoundNotifier(self.config)
 
+        self.notifier.simple_notify("Started clipfdb")
         self.snd_notifier.play(self.snd_notifier.startup_sound)
+
 
         # Sets up the FIREBIRD env var for securty2.fdb lookup
         # Point to our current VVV firebird database (for security2.fdb)
@@ -80,11 +74,31 @@ class FDBController():
                 )
             )
 
+    def active_toggle(self, signum, stackframe):
+        """Signal handler for SIGUSR1. Called from Clipster."""
+
+        if not self.wants_terminal_output \
+        and not self.config.getboolean('clipfdb', 'sound_notifications') \
+        and not self.config.getboolean('clipfdb', 'notifications'):
+            return
+
+        self.is_disabled = not self.is_disabled
+
+        if self.is_disabled:
+            self.snd_notifier.play(self.snd_notifier.shutdown_sound)
+            self.notifier.simple_notify("Paused clipfdb")
+        else:
+            self.snd_notifier.play(self.snd_notifier.startup_sound)
+            self.notifier.simple_notify("Resumed clipfdb")
+
     def exit(self):
         """Called from Clipster Daemon."""
         if getattr(self, "snd_notifier", None) is not None:
             self.snd_notifier.play(self.snd_notifier.shutdown_sound)
-        # self.parent.exit()
+
+        if getattr(self, "notifier", None) is not None:
+            self.notifier.simple_notify("Exited clipfdb and Clipster")
+        # self.parent.exit()  # Clipster Daemon object is set as parent
         # sys.exit(0)
 
     def query(self, clipboard_str):
@@ -363,6 +377,11 @@ class Notifier():
         else:
             self._provider = SPNotifier(config)
 
+    def simple_notify(self, message):
+        if self._provider is None:
+            return
+        return self._provider.simple_notify(message)
+
     def notify(self, message):
         if self._provider is None:
             return
@@ -380,29 +399,40 @@ class SPNotifier():
             self.process_unavail = True
             return
         print(f"Using subprocess \"{self.process_name}\" for desktop notifications.")
+        self.short_timeout = 1000  # 1 second
+        # timeout is defined in the notification server's config (per category)
+
+    def simple_notify(self, message):
+        """Show a generic message."""
+        self.call_process(("-t", str(self.short_timeout), message))
 
     def notify(self, message):
-        """Pass dict['valid_words', 'count', 'original_word']."""
+        """Prepare arguments for the notification tool.
+        :param message dict()."""
 
         if self.process_unavail:
             return
 
-        if message['count'] > 0:
-            category = 'clipfdb_found'
+        if message["count"] > 0:
+            category = "clipfdb_found"
         else:
-            category = 'clipfdb_notfound'
+            category = "clipfdb_notfound"
 
-        found_words = ""
-        summary = "".join(("For ", message['original_query'],
-                           " in ", message['db_filename']))
+        main_message = ""
+        summary = "".join(("For ", message["original_query"],
+                           " in ", message["db_filename"]))
 
-        for item, size, pardir in message['found_words']:
-            found_words += "".join([item, " ", bytes_2_human_readable(size),
+        for item, size, pardir in message["found_words"]:
+            main_message += "".join([item, " ", bytes_2_human_readable(size),
                                     " ", str(pardir), "\n"])
 
+        self.call_process(("-c", category, summary, main_message))
+
+    def call_process(self, arguments):
         try:
             # cmd = ['notify-send', '-c', category, '-i', 'dialog-information', summary, found_words]
-            cmd = [self.process_name, '-c', category, summary, found_words]
+            cmd = [self.process_name]
+            cmd.extend(arguments)
             run(cmd,
                 shell=False,
                 # check=True,
@@ -419,6 +449,7 @@ class Notifier2():
     """Use notify2 library."""
     def __init__(self):
         notify2.init("clipboard")
+        self.short_timeout = 1000  # 1 second
         self.timeout = 5000  # 5 seconds
         print(f"Using notify2 library for desktop notifications.")
         # DEBUG
@@ -428,11 +459,17 @@ class Notifier2():
         # print("caps:\n" + json.dumps(caps))
         # self.sendnotification("FDB_QUERY")
 
+    def simple_notify(self, message):
+        """Show a generic message."""
+        notif = notify2.Notification(message)
+        notif.timeout = self.short_timeout
+        notif.show()
+
     def notify(self, message):
         """sends dict['found_words'] to notification server."""
-        found_words = ""
+        main_message = ""
         for item, size, pardir in message['found_words']:
-            found_words += "".join([item, " ", bytes_2_human_readable(size),
+            main_message += "".join([item, " ", bytes_2_human_readable(size),
                                     " ", str(pardir), "\n"])
 
         count = message['count']
@@ -441,7 +478,7 @@ class Notifier2():
                             message['db_filename']))
 
         notif = notify2.Notification(summary,
-                                     found_words
+                                     main_message
                                      # "dialog-information" # Icon name in /usr/share/icons/
                                     )
         notif.timeout = self.timeout

@@ -17,10 +17,12 @@ pip install -r requirements.txt
 1. start `start_daemon.sh`, preferably with a key binding to toggle it on/off. The Clipster client can also be used as usual.
 For example in i3 config file:
 ```
-bindsym $mod+Shift+i exec --no-startup-id "/path/to/clipfdb/start_daemon.sh --venv --no-terminal-output"
+bindsym $mod+Shift+i exec --no-startup-id "/path/to/clipfdb/start_daemon.sh --venv --no-terminal-output --toggle"
 bindsym $mod+c exec --no-startup-id "/path/to/clipfdb/clipster/clipster -sc"
 ```
 The shell script can be started with argument **--venv** to automatically find and activate a python venv.
+
+The --toggle switch will pause/resume clipfdb, and will not quit Clipster. However, calling the start_daemon.sh script without this flag *will* quit Clipster.
 
 Files which have been found in the databases will be either printed to terminal (if started from one and is not suppressed by argument --no-terminal-output)
 or/and simply displayed as a notification through your notification server of choice (dunst, xfce4-notifyd, etc.) with optional sound effect.

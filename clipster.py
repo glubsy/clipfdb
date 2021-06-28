@@ -37,7 +37,7 @@ else:
     FileNotFoundError = EnvironmentError  # pylint: disable=redefined-builtin
     FileExistsError = ProcessLookupError = OSError  # pylint: disable=redefined-builtin
 
-import fdb_query
+from clipfdb import fdb_query
 
 class suppress_if_errno(object):
     """A context manager which suppresses exceptions with an errno attribute which matches the given value.
@@ -716,6 +716,7 @@ class Daemon(object):
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGINT, self.exit)
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGTERM, self.exit)
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGHUP, self.exit)
+        signal.signal(signal.SIGUSR1, self.fdb_handle.active_toggle)
 
         # Timeout for flushing history to disk
         # Do nothing if timeout is 0, or write_on_change is set in config
