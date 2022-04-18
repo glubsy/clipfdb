@@ -1,5 +1,6 @@
 #!/bin/env python3
 from os import environ, path, sep
+from typing import List
 import re
 # import sys
 from subprocess import run
@@ -52,7 +53,6 @@ class FDBController():
         self.notifier.simple_notify("Started clipfdb")
         self.snd_notifier.play(self.snd_notifier.startup_sound)
 
-
         # Sets up the FIREBIRD env var for securty2.fdb lookup
         # Point to our current VVV firebird database (for security2.fdb)
         # environ['FIREBIRD'] = '~/INSTALLED/VVV-1.3.0-x86_64/firebird'
@@ -62,17 +62,33 @@ class FDBController():
         # TODO add to config file options for alternative sorting
         setlocale(LC_ALL, "")
 
-        self.db_handles = []
+        self.db_handles = self.init_databases()
+
+    def init_databases(self) -> List:
+        """
+        Return a list of FDB objects, representing firebird database connections.
+        """
+        handles = []
         # Ignore the "clipfdb" top section
         for db_section in self.config.sections()[1:]:
-            self.db_handles.append(
-                FDB(
-                    self.config.get(db_section, 'filepath'),
-                    self.config.get(db_section, 'username'),
-                    self.config.get(db_section, 'password'),
-                    self.config
-                )
+            dbh = FDB(
+                self.config.get(db_section, 'filepath'),
+                self.config.get(db_section, 'username'),
+                self.config.get(db_section, 'password'),
+                self.config
             )
+            handles.append(dbh)
+            try:
+                dbh.init_connection()
+            except Exception as e:
+                # FIXME have red background on notification
+                self.notifier.simple_notify(f"{e}", timeout=5000)
+                continue
+
+        print("Number of active databases: "
+             f"{len([h for h in handles if h.con is not None])} "
+             f"/ {len(handles)}.")
+        return handles
 
     def active_toggle(self, signum, stackframe):
         """Signal handler for SIGUSR1. Called from Clipster."""
@@ -94,6 +110,14 @@ class FDBController():
             self.notifier.simple_notify("Resumed clipfdb")
             if self.wants_terminal_output:
                 print("Resumed clipfdb.")
+            for db in self.db_handles:
+                if db.con is None:
+                    try:
+                        db.init_connection()
+                    except Exception as e:
+                        # FIXME have red background on notification
+                        self.notifier.simple_notify(f"{e}", timeout=5000)
+                        continue
 
     def exit(self):
         """Called from Clipster Daemon."""
@@ -114,20 +138,22 @@ class FDBController():
         if len(clipboard_str) > 200:
             return
 
-        filtered = filter_content(clipboard_str)
+        query_str = filter_content(clipboard_str)
 
-        if not filtered:
+        if not query_str:
             return
 
         _q = []
 
         for db in self.db_handles:
+            if db.con is None:
+                continue
             query_dict = {}
             query_dict['db_filename'] = db.db_filename
-            query_dict['original_query'] = filtered
+            query_dict['original_query'] = query_str
             try:
                 query_dict['found_words'],\
-                query_dict['count'] = db.query(filtered, db.con)
+                query_dict['count'] = db.query(query_str)
             except Exception as e:
                 print(f"{BColors.FAIL}{e}{BColors.ENDC}")
                 continue
@@ -159,6 +185,9 @@ tter_repattern = re.compile(r'https?:\/\/pbs\.twimg\.com\/media\/(.{15})\?.*')
 
 
 def filter_content(clipboard_str):
+    """
+    Return a string properly formatted for queries.
+    """
     line = clipboard_str.split("\n")[0]  # Stop at the first newline
     if len(line) < 4:  # Too short for efficient query
         return None
@@ -223,7 +252,7 @@ class FDB():
 
         self.max_results = config.getint('clipfdb', "max_results")
         self.wants_parent_directories = config.getboolean('clipfdb', "parent_directories")
-        self.con = self.init_connection()
+        self.con = None
 
     def init_connection(self):
         con = None
@@ -239,8 +268,10 @@ class FDB():
             # fb_library_name="/usr/lib/libfbclient.so" #HACK HACK
         )
         except Exception as e:
-            print(f"Error initializing connection to {self.db_filename}: {e}")
-            con = None  # redundant?
+            print(f"No connection to \"{self.db_filename}\": {e}")
+            raise Exception(f"No connection to \"{self.db_filename}\": {e}")
+
+        self.con = con
         return con
 
     def make_select(self, query_str):
@@ -260,22 +291,19 @@ class FDB():
         return "select " + limit + " FILE_NAME, FILE_SIZE, PATH_ID from FILES WHERE UPPER \
 (FILE_NAME) LIKE '%" + query_str + "%'"
 
-    def query(self, query_str, con):
+    def query(self, query_str):
         """Search our FDB for word
         returns set(result_list), int(found_count)"""
 
-        if not con:
-            con = self.init_connection()
-            if not con:
-                raise Exception(f"Failed connection to database {self.db_filename}")
-            self.con = con
+        if not self.con:
+            raise Exception(f"No connection to database {self.db_filename}.")
 
         # print("DEBUG get_set_from_result(): looking for: |" + queryobj.query_dict['original_query'] + "|")
         # con1 = fdb.services.connect(user='SYSDBA', password='masterkey')
         # print("Security file for database is: ", con1.get_security_database_path() + "\n")
         # print(f"Active connections: {con1.get_connection_count()}")
 
-        cur = con.cursor()
+        cur = self.con.cursor()
 
         SELECT = self.make_select(query_str)
 
