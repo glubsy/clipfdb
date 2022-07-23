@@ -2,6 +2,7 @@
 from os import environ, path, sep
 from typing import List
 import re
+from pathlib import Path
 # import sys
 from subprocess import run
 # import json
@@ -17,12 +18,9 @@ from .constants import BColors
 
 import fdb
 
-try:
-    import notify2
-    NOTIFY2_AVAIL = True
-except ImportError as e:
-    print(f"Error importing notify2: {e}")
-    NOTIFY2_AVAIL = False
+# TODO replace notify2 with https://pypi.org/project/desktop-notify
+# Notify2 is deprecated and now broken due to changes in the dbus module API
+NOTIFY2_AVAIL = False
 
 try:
     import simpleaudio
@@ -403,9 +401,9 @@ class Notifier():
         if not config.getboolean('clipfdb', 'notifications'):
             return
 
-        if config.get('clipfdb', 'notification_provider') == "notify2"\
+        if config.get('clipfdb', 'notification_provider') == "notify2" \
         and NOTIFY2_AVAIL:
-            self._provider = Notifier2()
+            self._provider = LibNotifier()
         else:
             self._provider = SPNotifier(config)
 
@@ -424,8 +422,10 @@ class SPNotifier():
     """Use a subprocess to send notification (notifier-send by default)"""
     def __init__(self, config):
         self.process_unavail = False
-        self.process_name = config.get('clipfdb', 'notification_provider',
-                                       fallback='notify-send')
+        self.process_name = config.get(
+            'clipfdb', 'notification_provider',
+            fallback='notify-send'
+        )
         if not self.process_name:
             print(f"Error. Notification provider \"{self.process_name}\" is incorrect.")
             self.process_unavail = True
@@ -475,54 +475,55 @@ class SPNotifier():
             self.process_unavail = True
 
 
-class Notifier2():
-    """Use notify2 library."""
-    def __init__(self):
-        notify2.init("clipboard")
-        self.timeout = 5000  # 5 seconds
-        print(f"Using notify2 library for desktop notifications.")
-        # DEBUG
-        # info = notify2.get_server_info()
-        # caps = notify2.get_server_caps()
-        # print("info:\n" + json.dumps(info))
-        # print("caps:\n" + json.dumps(caps))
-        # self.sendnotification("FDB_QUERY")
+class LibNotifier():
+    pass
+#     """Use python library to send out notifications"""
+#     def __init__(self):
+#         notify2.init("clipboard")
+#         self.timeout = 5000  # 5 seconds
+#         print(f"Using notify2 library for desktop notifications.")
+#         # DEBUG
+#         # info = notify2.get_server_info()
+#         # caps = notify2.get_server_caps()
+#         # print("info:\n" + json.dumps(info))
+#         # print("caps:\n" + json.dumps(caps))
+#         # self.sendnotification("FDB_QUERY")
 
-    def simple_notify(self, message, timeout=1000):
-        """Show a generic message.
-        :param message str short message
-        :param timeout int display duration in milliseconds"""
-        notif = notify2.Notification(message)
-        notif.timeout = timeout
-        notif.show()
+#     def simple_notify(self, message, timeout=1000):
+#         """Show a generic message.
+#         :param message str short message
+#         :param timeout int display duration in milliseconds"""
+#         notif = notify2.Notification(message)
+#         notif.timeout = timeout
+#         notif.show()
 
-    def notify(self, message):
-        """sends dict['found_words'] to notification server."""
-        main_message = ""
-        for item, size, pardir in message['found_words']:
-            main_message += "".join([item, " ", bytes_2_human_readable(size),
-                                    " ", str(pardir), "\n"])
+#     def notify(self, message):
+#         """sends dict['found_words'] to notification server."""
+#         main_message = ""
+#         for item, size, pardir in message['found_words']:
+#             main_message += "".join([item, " ", bytes_2_human_readable(size),
+#                                     " ", str(pardir), "\n"])
 
-        count = message['count']
-        summary = "".join(("Found: ", str(count), " for ",
-                            message['original_query'], " in ",
-                            message['db_filename']))
+#         count = message['count']
+#         summary = "".join(("Found: ", str(count), " for ",
+#                             message['original_query'], " in ",
+#                             message['db_filename']))
 
-        notif = notify2.Notification(summary,
-                                     main_message
-                                     # "dialog-information" # Icon name in /usr/share/icons/
-                                    )
-        notif.timeout = self.timeout
-        # Set categories for notif server to display special colours and stuffs
-        if count > 0:
-            notif.set_category('clipfdb_found')
-        else:
-            notif.set_category('clipfdb_notfound')
-        # notif.set_location(800, 600)  # Not supported by dunst
-        try:
-            notif.show()
-        except Exception as e:
-            print(f"Exception in notify2.show(): {e}")
+#         notif = notify2.Notification(summary,
+#                                      main_message
+#                                      # "dialog-information" # Icon name in /usr/share/icons/
+#                                     )
+#         notif.timeout = self.timeout
+#         # Set categories for notif server to display special colours and stuffs
+#         if count > 0:
+#             notif.set_category('clipfdb_found')
+#         else:
+#             notif.set_category('clipfdb_notfound')
+#         # notif.set_location(800, 600)  # Not supported by dunst
+#         try:
+#             notif.show()
+#         except Exception as e:
+#             print(f"Exception in notify2.show(): {e}")
 
 
 class SoundNotifier():
@@ -758,7 +759,7 @@ def parse_args():
 each found item in database.")
 
     parser.add_argument('--notification-provider', action="store",
-                        type=str, default="notify2",
+                        type=str, default=None,
                         # choices=['notify2', 'notify-send'],
                         help="Desktop notification provider: notify2 library or \
 notify-send subprocess. [notify2|notify-send|...")
@@ -783,30 +784,34 @@ def init_config(args):
 
     # data_dir = path.dirname(__file__)
     config_defaults = {
-                        "conf_dir": conf_dir,  # clipfdb config dir
-                        "db_filepaths": "", # list of paths to databses files
-                        "security2_path": "", # absolute path to security2.fdb
-                        "parent_directories": "yes", # retrieve parent directories of files too
-                        "max_results": 20, # maximum number of results to report
-                        "notifications": "yes",
-                        "notification_provider": "notify2", # prefer using notify-send instead of notify2
-                        "sound_notifications": "yes",
-                        "sound_provider": "simpleaudio", # either paplay or simpleaudio
-                        "terminal_output": "no", # output query results to stdout
-                        "success_sound": "", # absolute path
-                        "failure_sound": "", # absolute path
-                        "startup_sound": "", # absolute path
-                        "shutdown_sound": "" # absolute path
-                        }
+        "conf_dir": conf_dir,  # clipfdb config dir
+        "db_filepaths": "", # list of paths to databses files
+        "security2_path": "", # absolute path to security2.fdb
+        "parent_directories": "yes", # retrieve parent directories of files too
+        "max_results": 20, # maximum number of results to report
+        "notifications": "yes",
+        "notification_provider": "notify-send", # prefer using notify-send instead of notify2
+        "sound_notifications": "yes",
+        "sound_provider": "simpleaudio", # either paplay or simpleaudio
+        "terminal_output": "no", # output query results to stdout
+        "success_sound": "", # absolute path
+        "failure_sound": "", # absolute path
+        "startup_sound": "", # absolute path
+        "shutdown_sound": "" # absolute path
+    }
 
     config = ConfigParser(config_defaults)
     config.add_section('clipfdb')
     conf_file = conf_dir + sep + "clipfdb.conf"
+    print(f"Loaded config file from {conf_file}")
     result = config.read(conf_file)
     if not result:
         print("Error trying to load the config file!")
 
     for key in vars(args):
+        if not getattr(args, key):
+            continue
+        print(f"Setting argument override: {key}: {str(getattr(args, key))}")
         config.set('clipfdb', key, str(getattr(args, key)))
     # print(f"{[(k, v) for (k, v) in config.items()]}")
     return config
