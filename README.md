@@ -39,8 +39,8 @@ These can be installed automatically with `pip install -r -requirements.txt`:
 
 * The Firebird python driver [fdb](https://pypi.org/project/fdb/) or [fdb_embedded](https://github.com/andrewleech/fdb_embedded). But note that it seems to be deprecated. It's kept as a submodule here for the time being, clone this repo with `--recurse` and get ready to fix it yourself.
 
-* [notify2](https://pypi.python.org/pypi/notify2) (optional) or notify-send and a notification daemon (ie. dunst).
-Warning: requires dbus python bindings, `pacman -S python-dbus` in Arch Linux.
+* [desktop-notify](https://pypi.python.org/pypi/desktop-notify) (optional) or notify-send and a notification daemon (ie. dunst).
+Warning: might also require dbus python bindings, `pacman -S python-dbus` in Arch Linux.
 
 * [simpleaudio](https://pypi.python.org/pypi/simpleaudio/) (optional) or paplay to play sound notifications.
 Actually any process can be called in place of paplay.
@@ -71,11 +71,7 @@ Example below, disables icon, makes body bold and green / red on found / nothing
 # TODO
 
 * Allow multiple lines to be parsed in turn (remove splitting on the first newline).
-
 * Enqueue requests for several rapid fire clipboard copies.
-
 * Try not to rely on clipster anymore, especially for future Wayland support.
-
 * Write a module to generate Firebird SQL databases ourselves.
-
-* Allow other SQL databases through API abstraction.
+* Allow other SQL databases through API abstraction layer.

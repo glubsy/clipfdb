@@ -3,30 +3,52 @@ from os import environ, path, sep
 from typing import List
 import re
 from pathlib import Path
-# import sys
 from subprocess import run
-# import json
 from operator import itemgetter
 from locale import setlocale, strxfrm, LC_ALL
 from argparse import BooleanOptionalAction, ArgumentParser
 from configparser import ConfigParser
 # from ast import literal_eval
 from urllib import parse
-# import typing
+import asyncio
+import logging
+log = logging.getLogger("clipster")
+# log.setLevel(logging.DEBUG)
+
+import fdb
+import desktop_notify
 
 from .constants import BColors
 
-import fdb
 
-# TODO replace notify2 with https://pypi.org/project/desktop-notify
-# Notify2 is deprecated and now broken due to changes in the dbus module API
-NOTIFY2_AVAIL = False
+# Notify2 is deprecated and now broken due to changes in the dbus module API.
+LIB_AVAIL = False
+try:
+    import desktop_notify
+    from dbus_next import Variant
+    LIB_AVAIL = True
+except ImportError as e:
+    log.warning(f"Failed to load library: {e}")
+    LIB_AVAIL = False
 
 try:
     import simpleaudio
     SA_AVAIL = True
 except ImportError:
     SA_AVAIL = False
+
+
+def do_async(coro):
+    """
+    Spawn a temporary asyncio loop to run the given coroutine, then close it.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+    ret = loop.run_until_complete(coro)
+    loop.run_until_complete(loop.shutdown_asyncgens())
+    return ret
 
 
 class FDBController():
@@ -396,13 +418,16 @@ in {BColors.BOLD}{query_dict.get('db_filename')}{BColors.ENDC}\n\
 
 
 class Notifier():
+    """
+    Abstract interface for either subprocess or python library.
+    """
     def __init__(self, config):
         self._provider = None
         if not config.getboolean('clipfdb', 'notifications'):
             return
 
-        if config.get('clipfdb', 'notification_provider') == "notify2" \
-        and NOTIFY2_AVAIL:
+        if config.get('clipfdb', 'notification_provider') == "native" \
+        and LIB_AVAIL:
             self._provider = LibNotifier()
         else:
             self._provider = SPNotifier(config)
@@ -476,54 +501,62 @@ class SPNotifier():
 
 
 class LibNotifier():
-    pass
-#     """Use python library to send out notifications"""
-#     def __init__(self):
-#         notify2.init("clipboard")
-#         self.timeout = 5000  # 5 seconds
-#         print(f"Using notify2 library for desktop notifications.")
-#         # DEBUG
-#         # info = notify2.get_server_info()
-#         # caps = notify2.get_server_caps()
-#         # print("info:\n" + json.dumps(info))
-#         # print("caps:\n" + json.dumps(caps))
-#         # self.sendnotification("FDB_QUERY")
+    """Use python library to send out notifications"""
+    timeout = 5000 # 5 seconds
 
-#     def simple_notify(self, message, timeout=1000):
-#         """Show a generic message.
-#         :param message str short message
-#         :param timeout int display duration in milliseconds"""
-#         notif = notify2.Notification(message)
-#         notif.timeout = timeout
-#         notif.show()
+    def __init__(self) -> None:
+        self.server = desktop_notify.aio.Server('clipfdb')
 
-#     def notify(self, message):
-#         """sends dict['found_words'] to notification server."""
-#         main_message = ""
-#         for item, size, pardir in message['found_words']:
-#             main_message += "".join([item, " ", bytes_2_human_readable(size),
-#                                     " ", str(pardir), "\n"])
+    def simple_notify(self, message, timeout=1000):
+        """Show a generic message.
+        :param message str short message
+        :param timeout int display duration in milliseconds"""
 
-#         count = message['count']
-#         summary = "".join(("Found: ", str(count), " for ",
-#                             message['original_query'], " in ",
-#                             message['db_filename']))
+        notify = self.server.Notify(message)
+        notify.set_timeout(timeout)
+        do_async(notify.show())
 
-#         notif = notify2.Notification(summary,
-#                                      main_message
-#                                      # "dialog-information" # Icon name in /usr/share/icons/
-#                                     )
-#         notif.timeout = self.timeout
-#         # Set categories for notif server to display special colours and stuffs
-#         if count > 0:
-#             notif.set_category('clipfdb_found')
-#         else:
-#             notif.set_category('clipfdb_notfound')
-#         # notif.set_location(800, 600)  # Not supported by dunst
-#         try:
-#             notif.show()
-#         except Exception as e:
-#             print(f"Exception in notify2.show(): {e}")
+    def notify(self, message):
+        """sends dict['found_words'] to notification server."""
+        main_message = ""
+        for item, size, pardir in message['found_words']:
+            main_message += "".join(
+                [
+                    item, " ", bytes_2_human_readable(size),
+                    " ", str(pardir), "\n"
+                ]
+            )
+
+        count = message['count']
+        summary = "".join(
+            (
+                "Found: ", str(count), " for ",
+                message['original_query'], " in ",
+                message['db_filename']
+            )
+        )
+
+        log.debug(f"Sending summary {summary} message {main_message}")
+        notif = self.server.Notify(
+            summary,
+            main_message
+            # "dialog-information" # Icon name in /usr/share/icons/
+        )
+        notif.timeout = self.timeout
+        # Set green background colour if results found, otherwise red. This is
+        # configured on the notification server's side (eg. dunst)
+        # We need dbus_next.Variant here because desktop-notify passes types
+        # as-is and dbus_next requires python types to be wrapped
+        if count > 0:
+            notif.set_hint('category',  Variant('s', 'clipfdb_found'))
+        else:
+            notif.set_hint('category',  Variant('s', 'clipfdb_notfound'))
+        # notif.set_location(800, 600)  # Not supported by dunst
+        try:
+            do_async(notif.show())
+        except Exception as e:
+            log.debug(f"Exception in lib .show(): {e}")
+            log.exception(e)
 
 
 class SoundNotifier():
@@ -760,9 +793,9 @@ each found item in database.")
 
     parser.add_argument('--notification-provider', action="store",
                         type=str, default=None,
-                        # choices=['notify2', 'notify-send'],
-                        help="Desktop notification provider: notify2 library or \
-notify-send subprocess. [notify2|notify-send|...")
+                        # choices=['native', 'notify-send'],
+                        help="Desktop notification provider: native library or \
+notify-send subprocess. [native|notify-send|...")
 
     parser.add_argument('--sound-provider', action="store",
                         type=str, default="simpleaudio",

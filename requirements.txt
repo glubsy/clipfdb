@@ -1,3 +1,4 @@
 fdb
-notify2
+desktop-notify
+dbus-next
 simpleaudio
